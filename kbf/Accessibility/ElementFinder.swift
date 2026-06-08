@@ -35,31 +35,50 @@ enum ElementFinder {
 
     struct Diagnostics { let rawCount: Int; let usedFastPath: Bool; let rawRoles: [String: Int]; let pressableCount: Int }
 
+    /// Apps whose accessibility tree is lazily built and needs `AXManualAccessibility`
+    /// to populate (Chromium + Electron). Native AppKit apps don't — and setting it on
+    /// them (Finder especially) makes their AX queries pathologically slow.
+    static func needsManualAccessibility(_ app: NSRunningApplication) -> Bool {
+        guard let id = app.bundleIdentifier?.lowercased() else { return false }
+        let markers = ["chrome", "chromium", "brave", "edgemac", "company.thebrowser",
+                       "electron", "vscode", "code-oss", "slack", "discord", "spotify",
+                       "notion", "figma", "obsidian", "1password", "linear", "whatsapp"]
+        return markers.contains { id.contains($0) }
+    }
+
     static func find(in app: NSRunningApplication) -> [Element] { find(in: app, diagnostics: nil) }
 
+    /// Hard cap on how long a single find may run. Some apps (notably Finder) have
+    /// pathologically slow accessibility — ~7ms per IPC call — so without this a busy
+    /// window could take many seconds. We return whatever was gathered by the deadline.
+    static let timeBudget: CFTimeInterval = 0.8
+
     static func find(in app: NSRunningApplication, diagnostics: UnsafeMutablePointer<Diagnostics>?) -> [Element] {
+        let deadline = CFAbsoluteTimeGetCurrent() + timeBudget
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
-        AX.setTimeout(axApp, seconds: 0.5)
+        AX.setTimeout(axApp, seconds: 0.25)
 
-        // Wake lazily-built Chromium/Electron trees. `AXManualAccessibility` is the
-        // flag those runtimes check; it's ignored by native apps. We deliberately do
-        // NOT set `AXEnhancedUserInterface` — it disrupts native Cocoa apps (Finder).
-        AX.setValue(axApp, "AXManualAccessibility", kCFBooleanTrue)
+        // Wake lazily-built Chromium/Electron trees — but ONLY for those apps.
+        // Setting this on native apps (e.g. Finder) makes their accessibility
+        // pathologically slow. (We never set `AXEnhancedUserInterface` — it
+        // disrupts native Cocoa apps.)
+        if needsManualAccessibility(app) {
+            AX.setValue(axApp, "AXManualAccessibility", kCFBooleanTrue)
+        }
 
+        let timing = ProcessInfo.processInfo.environment["KBF_TIMING"] != nil
+        let t0 = CFAbsoluteTimeGetCurrent()
         let root = AX.element(axApp, kAXFocusedWindowAttribute as String) ?? axApp
+        // Bound calls on the window element too — the messaging timeout is per-element,
+        // so setting it on axApp alone doesn't cover the window or its children.
+        AX.setTimeout(root, seconds: 0.25)
 
         var nodes: [Node] = []
-        let usedFast: Bool
-        if let fast = AX.searchPredicate(root: root), !fast.isEmpty,
-           fast.prefix(20).contains(where: { AX.string($0, kAXRoleAttribute as String) != nil }) {
-            // Predicate succeeded AND returns readable elements. (Some apps, e.g. Finder,
-            // return a few unreadable elements from the predicate — treat as failure.)
-            usedFast = true
-            nodes.reserveCapacity(fast.count)
-            for el in fast { nodes.append(makeNode(el)) }
-        } else {
-            usedFast = false
-            walk(root: root, into: &nodes)
+        let usedFast = false
+        walk(root: root, deadline: deadline, into: &nodes)
+        if timing {
+            print(String(format: "  timing: walk %.0fms for %d nodes",
+                         (CFAbsoluteTimeGetCurrent() - t0) * 1000, nodes.count))
         }
 
         let bounds = Geometry.screensBounds
@@ -67,6 +86,7 @@ enum ElementFinder {
         var result: [Element] = []
         var pressable = 0
         for n in nodes {
+            if CFAbsoluteTimeGetCurrent() > deadline { break }   // bound the actions lookups too
             guard let f = n.frame, f.width >= 4, f.height >= 4, f.width < 6000, f.height < 6000,
                   bounds.intersects(Geometry.axToCocoa(f)) else { continue }
             let keep: Bool
@@ -107,8 +127,10 @@ enum ElementFinder {
     /// to one), largest-visible first.
     static func scrollAreas(in app: NSRunningApplication) -> [Element] {
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
-        AX.setTimeout(axApp, seconds: 0.5)
-        AX.setValue(axApp, "AXManualAccessibility", kCFBooleanTrue)
+        AX.setTimeout(axApp, seconds: 0.25)
+        if needsManualAccessibility(app) {
+            AX.setValue(axApp, "AXManualAccessibility", kCFBooleanTrue)
+        }
         let root = AX.element(axApp, kAXFocusedWindowAttribute as String) ?? axApp
         let visible = Geometry.screensBoundsAX
         var found: [Element] = []
@@ -156,17 +178,18 @@ enum ElementFinder {
     /// The clip = the focused window's frame: scrolled-away/off-viewport content
     /// (the bulk of a long web page) has frames outside it and is skipped, so cost
     /// scales with VISIBLE elements, not the whole document.
-    private static func walk(root: AXUIElement, into out: inout [Node]) {
+    private static func walk(root: AXUIElement, deadline: CFTimeInterval, into out: inout [Node]) {
         let v = AX.values(root, walkAttrs)
         let clip = AX.rect(v[2], v[3])
         for c in (v[1] as? [AXUIElement] ?? []) {
-            walkChild(c, depth: 1, clip: clip, into: &out)
-            if out.count >= maxWalk { return }
+            walkChild(c, depth: 1, clip: clip, deadline: deadline, into: &out)
+            if out.count >= maxWalk || CFAbsoluteTimeGetCurrent() > deadline { return }
         }
     }
 
-    private static func walkChild(_ el: AXUIElement, depth: Int, clip: CGRect?, into out: inout [Node]) {
-        if depth > 80 || out.count >= maxWalk { return }
+    private static func walkChild(_ el: AXUIElement, depth: Int, clip: CGRect?,
+                                  deadline: CFTimeInterval, into out: inout [Node]) {
+        if depth > 80 || out.count >= maxWalk || CFAbsoluteTimeGetCurrent() > deadline { return }
         let v = AX.values(el, walkAttrs)
         let frame = AX.rect(v[2], v[3])
         // Prune off-screen subtrees (only when we have a real, non-empty frame).
@@ -175,8 +198,8 @@ enum ElementFinder {
                         title: (v[4] as? String) ?? (v[5] as? String)))
         guard out.count < maxWalk, let children = v[1] as? [AXUIElement] else { return }
         for c in children {
-            walkChild(c, depth: depth + 1, clip: clip, into: &out)
-            if out.count >= maxWalk { return }
+            walkChild(c, depth: depth + 1, clip: clip, deadline: deadline, into: &out)
+            if out.count >= maxWalk || CFAbsoluteTimeGetCurrent() > deadline { return }
         }
     }
 }
