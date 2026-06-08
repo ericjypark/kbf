@@ -43,7 +43,7 @@ final class ModeController {
 
     func enterClick() {
         guard let app = beginFinding() else { return }
-        asyncFind({ ElementFinder.find(in: app) }) { [weak self] elements in
+        asyncFind({ ElementFinder.find(in: app) + ElementFinder.menuBarAndDock(frontApp: app) }) { [weak self] elements in
             guard let self else { return }
             guard !elements.isEmpty else { self.finishEmpty(); return }
             self.showHints(elements)

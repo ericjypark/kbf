@@ -46,6 +46,13 @@ enum DebugDump {
         }
         if elements.count > 50 { print("  … and \(elements.count - 50) more") }
 
+        let extras = ElementFinder.menuBarAndDock(frontApp: app)
+        print("menu bar + dock: \(extras.count)")
+        for e in extras.prefix(24) {
+            let f = e.axFrame
+            print("  \(e.role.padding(toLength: 14, withPad: " ", startingAt: 0)) (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))  \(e.title ?? "")")
+        }
+
         let areas = ElementFinder.scrollAreas(in: app)
         print("scroll areas: \(areas.count)")
         for a in areas.prefix(5) {

@@ -168,6 +168,46 @@ enum ElementFinder {
         }
     }
 
+    // MARK: menu bar + Dock (clickable from anywhere, not in the app's window)
+
+    /// The frontmost app's menu-bar items (Apple menu, app menu, File, Edit, …) plus
+    /// the Dock's items, so they can be labeled and clicked from any app.
+    static func menuBarAndDock(frontApp: NSRunningApplication) -> [Element] {
+        var out: [Element] = []
+        let deadline = CFAbsoluteTimeGetCurrent() + 0.3
+
+        let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
+        AX.setTimeout(axApp, seconds: 0.25)
+        if let menuBar = AX.element(axApp, kAXMenuBarAttribute as String) {
+            for item in AX.elements(menuBar, kAXChildrenAttribute as String) {
+                if let f = AX.frame(item), f.width >= 2, f.height >= 2 {
+                    out.append(Element(ax: item, role: "AXMenuBarItem", axFrame: f,
+                                       title: AX.string(item, kAXTitleAttribute as String)))
+                }
+            }
+        }
+
+        if let dock = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.apple.dock" }) {
+            let axDock = AXUIElementCreateApplication(dock.processIdentifier)
+            AX.setTimeout(axDock, seconds: 0.25)
+            collectDockItems(axDock, depth: 0, deadline: deadline, into: &out)
+        }
+        return out
+    }
+
+    private static func collectDockItems(_ el: AXUIElement, depth: Int, deadline: CFTimeInterval, into out: inout [Element]) {
+        if depth > 12 || CFAbsoluteTimeGetCurrent() > deadline { return }
+        for child in AX.elements(el, kAXChildrenAttribute as String) {
+            let role = AX.string(child, kAXRoleAttribute as String) ?? ""
+            if role == "AXDockItem", let f = AX.frame(child), f.width >= 8, f.height >= 8 {
+                out.append(Element(ax: child, role: role, axFrame: f,
+                                   title: AX.string(child, kAXTitleAttribute as String)))
+            } else {
+                collectDockItems(child, depth: depth + 1, deadline: deadline, into: &out)
+            }
+        }
+    }
+
     private static func makeNode(_ el: AXUIElement) -> Node {
         let v = AX.values(el, nodeAttrs)
         return Node(ax: el, role: v[0] as? String ?? "", frame: AX.rect(v[1], v[2]),

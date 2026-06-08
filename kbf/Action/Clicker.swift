@@ -27,24 +27,26 @@ enum Clicker {
 
     @discardableResult
     static func perform(_ action: Action, on element: Element) -> Outcome {
+        // Clamp on-screen so off-screen-center elements (e.g. Dock tiles) click real pixels.
+        let p = Geometry.clampAX(element.axCenter)
         switch action {
         case .left:
             if let a = axPress(element) { return .axAction(a) }
-            synthClick(at: element.axCenter, button: .left, clicks: 1)
-            return .synthesized(element.axCenter)
+            synthClick(at: p, button: .left, clicks: 1)
+            return .synthesized(p)
         case .double:
-            synthClick(at: element.axCenter, button: .left, clicks: 2)
-            return .synthesized(element.axCenter)
+            synthClick(at: p, button: .left, clicks: 2)
+            return .synthesized(p)
         case .right:
             if AX.perform(element.ax, "AXShowMenu") { return .axAction("AXShowMenu") }
-            synthClick(at: element.axCenter, button: .right, clicks: 1)
-            return .synthesized(element.axCenter)
+            synthClick(at: p, button: .right, clicks: 1)
+            return .synthesized(p)
         case .command:
-            synthClick(at: element.axCenter, button: .left, clicks: 1, flags: .maskCommand)
-            return .synthesized(element.axCenter)
+            synthClick(at: p, button: .left, clicks: 1, flags: .maskCommand)
+            return .synthesized(p)
         case .move:
-            CGWarpMouseCursorPosition(element.axCenter)
-            return .moved(element.axCenter)
+            CGWarpMouseCursorPosition(p)
+            return .moved(p)
         }
     }
 

@@ -36,8 +36,11 @@ final class OverlayWindowController {
         var placed: [CGRect] = []
         for a in assignments {
             let cocoa = Geometry.axToCocoa(a.element.axFrame)
-            let center = CGPoint(x: cocoa.midX - origin.x, y: cocoa.midY - origin.y)
-            let scale = OverlayWindowController.backingScale(at: CGPoint(x: cocoa.midX, y: cocoa.midY))
+            // Clamp on-screen so edge elements (e.g. Dock tiles, whose frames hang below
+            // the screen) still get a visible pill.
+            let global = Geometry.clampCocoa(CGPoint(x: cocoa.midX, y: cocoa.midY))
+            let center = CGPoint(x: global.x - origin.x, y: global.y - origin.y)
+            let scale = OverlayWindowController.backingScale(at: global)
             let (pill, text) = makePill(a.label, center: center, scale: scale)
             pill.frame = deOverlap(pill.frame, against: placed)
             placed.append(pill.frame)

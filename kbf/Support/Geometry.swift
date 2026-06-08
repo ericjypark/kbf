@@ -34,4 +34,17 @@ enum Geometry {
     static var screensBoundsAX: CGRect {
         NSScreen.screens.reduce(.null) { $0.union(cocoaToAX($1.frame)) }
     }
+
+    /// Clamp an AX (top-left) point to just inside the visible screens. Keeps clicks
+    /// on edge elements (e.g. Dock tiles, which report frames hanging below the screen)
+    /// on the actual pixels.
+    static func clampAX(_ p: CGPoint) -> CGPoint { clamp(p, screensBoundsAX) }
+    /// Clamp an AppKit (bottom-left) point to just inside the visible screens.
+    static func clampCocoa(_ p: CGPoint) -> CGPoint { clamp(p, screensBounds) }
+
+    private static func clamp(_ p: CGPoint, _ rect: CGRect) -> CGPoint {
+        guard !rect.isNull else { return p }
+        let b = rect.insetBy(dx: 4, dy: 4)
+        return CGPoint(x: min(max(p.x, b.minX), b.maxX), y: min(max(p.y, b.minY), b.maxY))
+    }
 }
