@@ -46,8 +46,9 @@ enum DebugDump {
         }
         if elements.count > 50 { print("  … and \(elements.count - 50) more") }
 
+        let mbStart = Date()
         let extras = ElementFinder.menuBarAndDock(frontApp: app)
-        print("menu bar + dock: \(extras.count)")
+        print("menu bar + dock: \(extras.count) in \(Int(Date().timeIntervalSince(mbStart) * 1000))ms")
         for e in extras.prefix(24) {
             let f = e.axFrame
             print("  \(e.role.padding(toLength: 14, withPad: " ", startingAt: 0)) (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))  \(e.title ?? "")")

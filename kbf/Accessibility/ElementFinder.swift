@@ -170,27 +170,74 @@ enum ElementFinder {
 
     // MARK: menu bar + Dock (clickable from anywhere, not in the app's window)
 
-    /// The frontmost app's menu-bar items (Apple menu, app menu, File, Edit, …) plus
-    /// the Dock's items, so they can be labeled and clicked from any app.
-    static func menuBarAndDock(frontApp: NSRunningApplication) -> [Element] {
-        var out: [Element] = []
-        let deadline = CFAbsoluteTimeGetCurrent() + 0.3
+    private static let extrasLock = NSLock()
+    private static var extrasCache: [Element] = []
+    private static var extrasCacheTime: CFTimeInterval = 0
+    private static var extrasRefreshing = false
 
-        let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
-        AX.setTimeout(axApp, seconds: 0.25)
-        if let menuBar = AX.element(axApp, kAXMenuBarAttribute as String) {
-            for item in AX.elements(menuBar, kAXChildrenAttribute as String) {
+    /// The frontmost app's menu-bar items (fresh) plus the Dock and right-side status
+    /// items. The latter require sweeping every running app for `AXExtrasMenuBar`, which
+    /// is far too slow to do on every activation (~500ms), so they're served from a cache
+    /// that refreshes in the background. Call `prewarmExtras()` at launch.
+    static func menuBarAndDock(frontApp: NSRunningApplication) -> [Element] {
+        frontAppMenus(frontApp) + cachedExtras()
+    }
+
+    /// Kick the background extras/Dock collection so it's ready by the first activation.
+    static func prewarmExtras() { _ = cachedExtras() }
+
+    private static func frontAppMenus(_ app: NSRunningApplication) -> [Element] {
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        AX.setTimeout(axApp, seconds: 0.2)
+        guard let menuBar = AX.element(axApp, kAXMenuBarAttribute as String) else { return [] }
+        return AX.elements(menuBar, kAXChildrenAttribute as String).compactMap { item in
+            guard let f = AX.frame(item), f.width >= 2, f.height >= 2 else { return nil }
+            return Element(ax: item, role: "AXMenuBarItem", axFrame: f,
+                           title: AX.string(item, kAXTitleAttribute as String))
+        }
+    }
+
+    private static func cachedExtras() -> [Element] {
+        extrasLock.lock()
+        let cache = extrasCache
+        let kickoff = (CFAbsoluteTimeGetCurrent() - extrasCacheTime > 3.0) && !extrasRefreshing
+        if kickoff { extrasRefreshing = true }
+        extrasLock.unlock()
+
+        if kickoff {
+            DispatchQueue.global(qos: .utility).async {
+                let fresh = collectExtras()
+                extrasLock.lock()
+                extrasCache = fresh
+                extrasCacheTime = CFAbsoluteTimeGetCurrent()
+                extrasRefreshing = false
+                extrasLock.unlock()
+            }
+        }
+        return cache
+    }
+
+    /// The slow sweep (runs in the background): every app's status items + the Dock.
+    private static func collectExtras() -> [Element] {
+        var out: [Element] = []
+        let deadline = CFAbsoluteTimeGetCurrent() + 1.0
+        for running in NSWorkspace.shared.runningApplications {
+            if CFAbsoluteTimeGetCurrent() > deadline { break }
+            let ax = AXUIElementCreateApplication(running.processIdentifier)
+            AX.setTimeout(ax, seconds: 0.1)
+            guard let extras = AX.element(ax, "AXExtrasMenuBar") else { continue }
+            for item in AX.elements(extras, kAXChildrenAttribute as String) {
                 if let f = AX.frame(item), f.width >= 2, f.height >= 2 {
-                    out.append(Element(ax: item, role: "AXMenuBarItem", axFrame: f,
-                                       title: AX.string(item, kAXTitleAttribute as String)))
+                    out.append(Element(ax: item, role: "AXMenuExtra", axFrame: f,
+                                       title: AX.string(item, kAXTitleAttribute as String)
+                                           ?? AX.string(item, kAXDescriptionAttribute as String)))
                 }
             }
         }
-
         if let dock = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.apple.dock" }) {
             let axDock = AXUIElementCreateApplication(dock.processIdentifier)
             AX.setTimeout(axDock, seconds: 0.25)
-            collectDockItems(axDock, depth: 0, deadline: deadline, into: &out)
+            collectDockItems(axDock, depth: 0, deadline: CFAbsoluteTimeGetCurrent() + 0.4, into: &out)
         }
         return out
     }

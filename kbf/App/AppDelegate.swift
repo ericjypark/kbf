@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         registerHotkeys()
+        ElementFinder.prewarmExtras()   // start the menu-extras/Dock cache filling in the background
         // Re-register whenever a hotkey setting changes (async so values are updated).
         AppSettings.shared.objectWillChange
             .sink { [weak self] in DispatchQueue.main.async { self?.registerHotkeys() } }
