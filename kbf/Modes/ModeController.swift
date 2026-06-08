@@ -6,7 +6,7 @@ import AppKit
 /// - click:      find → label → overlay → type label → click
 /// - scroll:     find scroll areas → (pick if >1) → j/k/d/u/h/l/g/G scroll
 final class ModeController {
-    private enum Mode { case idle, finding, clickHints, scrollPick, scrolling, search }
+    private enum Mode { case idle, finding, clickHints, scrollPick, scrolling, search, doubleArmed }
 
     private let overlay = OverlayWindowController()
     private let searchBar = SearchBar()
@@ -14,6 +14,8 @@ final class ModeController {
     private var mode: Mode = .idle
     private var matcher: HintMatcher?
     private var scrollTarget: Element?
+    private var armedMatcher: HintMatcher?   // post-click window: retype the label to double-click
+    private var armWork: DispatchWorkItem?
     private var searchElements: [Element] = []
     private var searchQuery = ""
     private var searchMatches: [Element] = []
@@ -85,10 +87,12 @@ final class ModeController {
 
     func cancel() {
         generation += 1   // discard any in-flight find
+        armWork?.cancel(); armWork = nil
         keyTap.stop()
         overlay.hide()
         searchBar.hide()
         matcher = nil
+        armedMatcher = nil
         scrollTarget = nil
         searchElements = []
         searchMatches = []
@@ -142,16 +146,53 @@ final class ModeController {
     private func handleKey(_ code: CGKeyCode, _ chars: String, _ flags: CGEventFlags) -> Bool {
         switch mode {
         case .idle, .finding: return false
-        case .clickHints: return handleHintKey(code, chars, flags) { [weak self] element, flags in
-            self?.cancel()
+        case .clickHints: return handleHintKey(code, chars, flags) { [weak self] element, flags, label in
+            guard let self else { return }
             let action = ModeController.clickAction(for: flags)
-            _ = Clicker.perform(action, on: element)
+            if action == .left {
+                // Single click now; keep listening so retyping the label double-clicks.
+                self.overlay.hide()
+                self.matcher = nil
+                Clicker.leftClick(on: element, clickState: 1)
+                self.armDouble(element: element, label: label)
+            } else {
+                self.cancel()
+                _ = Clicker.perform(action, on: element)
+            }
         }
-        case .scrollPick: return handleHintKey(code, chars, flags) { [weak self] area, _ in
+        case .scrollPick: return handleHintKey(code, chars, flags) { [weak self] area, _, _ in
             self?.startScrolling(area)
         }
         case .scrolling: return handleScrollKey(code, chars, flags)
         case .search: return handleSearchKey(code, chars)
+        case .doubleArmed: return handleDoubleArmedKey(code, chars)
+        }
+    }
+
+    /// After a left click, listen briefly: retyping the same label within the system
+    /// double-click interval sends a second click (state 2) → a real double-click.
+    private func armDouble(element: Element, label: String) {
+        armedMatcher = HintMatcher([(label, element)])
+        mode = .doubleArmed
+        let work = DispatchWorkItem { [weak self] in self?.cancel() }
+        armWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(NSEvent.doubleClickInterval, 0.25), execute: work)
+    }
+
+    private func handleDoubleArmedKey(_ code: CGKeyCode, _ chars: String) -> Bool {
+        if code == Key.escape { cancel(); return true }
+        guard let ch = chars.first, ch.isLetter, armedMatcher != nil else {
+            cancel(); return false   // not a retype — disarm and let the key through
+        }
+        switch armedMatcher!.input(ch) {
+        case .matched(let element):
+            armWork?.cancel()
+            DispatchQueue.main.async { self.cancel(); Clicker.leftClick(on: element, clickState: 2) }
+            return true
+        case .narrowed:
+            return true
+        case .noMatch:
+            cancel(); return false   // wrong key — disarm and let it through
         }
     }
 
@@ -209,7 +250,7 @@ final class ModeController {
     /// Shared hint-typing handler for click + scroll-pick. `onMatch` is deferred
     /// out of the tap callback (posting events from inside it gets them dropped).
     private func handleHintKey(_ code: CGKeyCode, _ chars: String, _ flags: CGEventFlags,
-                               onMatch: @escaping (Element, CGEventFlags) -> Void) -> Bool {
+                               onMatch: @escaping (Element, CGEventFlags, String) -> Void) -> Bool {
         if code == Key.escape { cancel(); return true }
         if code == Key.delete {
             if matcher != nil { _ = matcher!.deleteLast(); overlay.update(typed: matcher!.typed) }
@@ -218,7 +259,8 @@ final class ModeController {
         guard let ch = chars.first, ch.isLetter, matcher != nil else { return false }
         switch matcher!.input(ch) {
         case .matched(let element):
-            DispatchQueue.main.async { onMatch(element, flags) }
+            let label = matcher!.typed
+            DispatchQueue.main.async { onMatch(element, flags, label) }
         case .narrowed:
             overlay.update(typed: matcher!.typed)
         case .noMatch:
@@ -228,11 +270,11 @@ final class ModeController {
     }
 
     /// Modifier held when the label completes chooses the click variant.
-    /// ⌘ → command-click · ⌃ → right-click · ⌥ → double-click · none → left-click.
+    /// ⌘ → command-click · ⌃ → right-click · none → left-click.
+    /// (Double-click is "type the label twice", not a modifier.)
     private static func clickAction(for flags: CGEventFlags) -> Clicker.Action {
         if flags.contains(.maskCommand) { return .command }
         if flags.contains(.maskControl) { return .right }
-        if flags.contains(.maskAlternate) { return .double }
         return .left
     }
 
