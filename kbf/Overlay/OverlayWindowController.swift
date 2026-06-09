@@ -185,7 +185,7 @@ final class OverlayWindowController {
         let str = styledLabel(label, typed: "")
         let pill = CALayer()
         pill.frame = frame
-        pill.backgroundColor = Theme.accent.cgColor
+        pill.backgroundColor = Theme.hintPill.cgColor
         pill.cornerRadius = Theme.hintCornerRadius
         pill.borderColor = NSColor.white.withAlphaComponent(0.25).cgColor
         pill.borderWidth = 0.5

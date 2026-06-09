@@ -29,6 +29,7 @@ enum Clicker {
     static func perform(_ action: Action, on element: Element) -> Outcome {
         // Clamp on-screen so off-screen-center elements (e.g. Dock tiles) click real pixels.
         let p = Geometry.clampAX(element.axCenter)
+        if action != .move { clickFeedback() }
         switch action {
         case .left:
             if let a = axPress(element) { return .axAction(a) }
@@ -55,6 +56,7 @@ enum Clicker {
     /// the OS register a real double-click — used by "type the label twice".
     @discardableResult
     static func leftClick(on element: Element, clickState: Int64) -> Outcome {
+        clickFeedback()
         let p = Geometry.clampAX(element.axCenter)
         let src = CGEventSource(stateID: .combinedSessionState)
         CGWarpMouseCursorPosition(p)
@@ -65,6 +67,12 @@ enum Clicker {
             e.post(tap: .cghidEventTap)
         }
         return .synthesized(p)
+    }
+
+    /// Optional audible tick on every click action (off by default).
+    private static func clickFeedback() {
+        guard AppSettings.shared.clickSound else { return }
+        NSSound(named: "Tink")?.play()
     }
 
     private static func axPress(_ element: Element) -> String? {

@@ -45,6 +45,11 @@ final class AppSettings: ObservableObject {
     /// Pixels per h/j/k/l press, and per ⇧-dash press.
     @Published var scrollStep: Double { didSet { defaults.set(scrollStep, forKey: "scrollStep") } }
     @Published var scrollDash: Double { didSet { defaults.set(scrollDash, forKey: "scrollDash") } }
+    @Published var labelTheme: LabelTheme { didSet { defaults.set(labelTheme.rawValue, forKey: "labelTheme") } }
+    @Published var hintScale: HintScale { didSet { defaults.set(hintScale.rawValue, forKey: "hintScale") } }
+    @Published var clickSound: Bool { didSet { defaults.set(clickSound, forKey: "clickSound") } }
+    /// Bundle identifiers of apps kbf won't activate in.
+    @Published var excludedApps: [String] { didSet { defaults.set(excludedApps, forKey: "excludedApps") } }
 
     static let defaultScrollStep = 90.0
     static let defaultScrollDash = 360.0
@@ -59,14 +64,27 @@ final class AppSettings: ObservableObject {
         scrollStep = step > 0 ? step : Self.defaultScrollStep
         let dash = defaults.double(forKey: "scrollDash")
         scrollDash = dash > 0 ? dash : Self.defaultScrollDash
+        labelTheme = defaults.string(forKey: "labelTheme").flatMap(LabelTheme.init) ?? .indigo
+        hintScale = defaults.string(forKey: "hintScale").flatMap(HintScale.init) ?? .medium
+        clickSound = defaults.bool(forKey: "clickSound")
+        excludedApps = defaults.stringArray(forKey: "excludedApps") ?? []
     }
 
     /// Alphabet as a clean character array (deduped, letters only, order preserved),
     /// falling back to the default if too short.
-    var alphabetChars: [Character] {
+    var alphabetChars: [Character] { Self.sanitizedAlphabet(alphabet) }
+
+    static func sanitizedAlphabet(_ raw: String) -> [Character] {
         var seen = Set<Character>(), out: [Character] = []
-        for c in alphabet.lowercased() where c.isLetter && seen.insert(c).inserted { out.append(c) }
+        for c in raw.lowercased() where c.isLetter && seen.insert(c).inserted { out.append(c) }
         return out.count >= 2 ? out : LabelMaker.defaultAlphabet
+    }
+
+    func isExcluded(_ bundleID: String?) -> Bool { Self.matchesExclusion(bundleID, in: excludedApps) }
+
+    static func matchesExclusion(_ bundleID: String?, in list: [String]) -> Bool {
+        guard let id = bundleID?.lowercased() else { return false }
+        return list.contains { $0.lowercased() == id }
     }
 
     private func write(_ hk: Hotkey, _ key: String) {

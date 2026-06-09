@@ -126,9 +126,11 @@ final class ModeController {
 
     // MARK: background find
 
-    /// Claims the active state and returns the frontmost app, or nil if busy.
+    /// Claims the active state and returns the frontmost app, or nil if busy
+    /// or the app is on the user's excluded list.
     private func beginFinding(_ k: Kind) -> NSRunningApplication? {
         guard mode == .idle, let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        guard !AppSettings.shared.isExcluded(app.bundleIdentifier) else { NSSound.beep(); return nil }
         mode = .finding   // blocks re-entry while the AX query runs off the main thread
         kind = k
         return app
