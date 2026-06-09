@@ -102,6 +102,39 @@ final class OverlayWindowController {
         screens.forEach { $0.panel.orderFrontRegardless() }
     }
 
+    /// Scroll mode: outline every scroll area's visible region with a numbered
+    /// badge (1-based, matching the 1–9 jump keys), accenting the active one.
+    func showScrollAreas(_ areas: [Element], active: Int) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        clear()
+        let visibleAX = Geometry.screensBoundsAX
+        for (i, area) in areas.enumerated() {
+            let vr = area.axFrame.intersection(visibleAX)
+            let cocoa = Geometry.axToCocoa(vr.isNull ? area.axFrame : vr)
+            guard let sp = screenPanel(at: CGPoint(x: cocoa.midX, y: cocoa.midY)) else { continue }
+            let local = CGRect(x: cocoa.minX - sp.screen.frame.minX, y: cocoa.minY - sp.screen.frame.minY,
+                               width: cocoa.width, height: cocoa.height).insetBy(dx: 3, dy: 3)
+            let isActive = i == active
+            let box = CALayer()
+            box.frame = local
+            box.cornerRadius = 8
+            box.borderWidth = isActive ? 2.5 : 1
+            box.borderColor = (isActive ? Theme.accent : NSColor.white.withAlphaComponent(0.25)).cgColor
+            sp.root.addSublayer(box)
+
+            let label = "\(i + 1)"
+            let size = pillSize(label)
+            let badgeFrame = CGRect(x: local.minX + 6, y: local.maxY - size.height - 6,
+                                    width: size.width, height: size.height)
+            let (pill, _) = makePill(label, frame: badgeFrame, scale: sp.screen.backingScaleFactor)
+            pill.opacity = isActive ? 1 : 0.55
+            sp.root.addSublayer(pill)
+        }
+        CATransaction.commit()
+        screens.forEach { $0.panel.orderFrontRegardless() }
+    }
+
     func hide() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)

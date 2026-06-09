@@ -24,9 +24,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
 
         menuBar = MenuBarController(
-            onTriggerClick: { [weak self] in self?.mode.enterClick() },
-            onTriggerScroll: { [weak self] in self?.mode.enterScroll() },
-            onTriggerSearch: { [weak self] in self?.mode.enterSearch() },
+            onTriggerClick: { [weak self] in self?.mode.toggleClick() },
+            onTriggerScroll: { [weak self] in self?.mode.toggleScroll() },
+            onTriggerSearch: { [weak self] in self?.mode.toggleSearch() },
             onOpenPreferences: { [weak self] in self?.prefs.show() })
     }
 
@@ -36,10 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.mode.toggleClick()
         }
         hotKeys.register(id: 2, keyCode: s.scrollHotkey.keyCode, modifiers: s.scrollHotkey.modifiers) { [weak self] in
-            self?.mode.enterScroll()
+            self?.mode.toggleScroll()
         }
         hotKeys.register(id: 3, keyCode: s.searchHotkey.keyCode, modifiers: s.searchHotkey.modifiers) { [weak self] in
-            self?.mode.enterSearch()
+            self?.mode.toggleSearch()
         }
     }
 }

@@ -1,19 +1,24 @@
 import AppKit
 
 /// Orchestrates the modes. Owns the single overlay + key-capture tap and routes
-/// keys by current mode. Esc always cancels.
+/// keys by current mode. Esc always cancels; each activation hotkey toggles its
+/// own mode and switches from any other.
 ///
 /// - click:      find → label → overlay → type label → click
-/// - scroll:     find scroll areas → (pick if >1) → j/k/d/u/h/l/g/G scroll
+/// - scroll:     find scroll areas → outline + number them → h/j/k/l (⇧ dash),
+///               d/u half page, g/G edges, Tab/⌃N/⌃P/1-9 switch area
 final class ModeController {
-    private enum Mode { case idle, finding, clickHints, scrollPick, scrolling, search, doubleArmed }
+    private enum Mode { case idle, finding, clickHints, scrolling, search, doubleArmed }
+    private enum Kind { case click, scroll, search }
 
     private let overlay = OverlayWindowController()
     private let searchBar = SearchBar()
     private let keyTap = KeyCaptureTap()
     private var mode: Mode = .idle
+    private var kind: Kind?                  // which activation owns the current mode
     private var matcher: HintMatcher?
-    private var scrollTarget: Element?
+    private var scrollAreas: [Element] = []
+    private var scrollActive = 0
     private var armedMatcher: HintMatcher?   // post-click window: retype the label to double-click
     private var armWork: DispatchWorkItem?
     private var searchElements: [Element] = []
@@ -41,10 +46,24 @@ final class ModeController {
 
     // MARK: entry points
 
-    func toggleClick() { isActive ? cancel() : enterClick() }
+    func toggleClick() { toggle(.click) }
+    func toggleScroll() { toggle(.scroll) }
+    func toggleSearch() { toggle(.search) }
+
+    /// Activation hotkeys toggle their own mode off and switch from any other.
+    private func toggle(_ k: Kind) {
+        let wasActive = kind
+        if mode != .idle { cancel() }
+        guard wasActive != k else { return }
+        switch k {
+        case .click: enterClick()
+        case .scroll: enterScroll()
+        case .search: enterSearch()
+        }
+    }
 
     func enterClick() {
-        guard let app = beginFinding() else { return }
+        guard let app = beginFinding(.click) else { return }
         asyncFind({ ElementFinder.find(in: app) + ElementFinder.menuBarAndDock(frontApp: app) }) { [weak self] elements in
             guard let self else { return }
             guard !elements.isEmpty else { self.finishEmpty(); return }
@@ -55,22 +74,20 @@ final class ModeController {
     }
 
     func enterScroll() {
-        guard let app = beginFinding() else { return }
+        guard let app = beginFinding(.scroll) else { return }
         asyncFind({ ElementFinder.scrollAreas(in: app) }) { [weak self] areas in
             guard let self else { return }
             guard !areas.isEmpty else { self.finishEmpty(); return }
             self.keyTap.start()
-            if areas.count == 1 {
-                self.startScrolling(areas[0])
-            } else {
-                self.showHints(areas)
-                self.mode = .scrollPick
-            }
+            self.scrollAreas = Array(areas.prefix(9))   // 1–9 jump keys address them
+            self.scrollActive = 0
+            self.overlay.showScrollAreas(self.scrollAreas, active: 0)
+            self.mode = .scrolling
         }
     }
 
     func enterSearch() {
-        guard let app = beginFinding() else { return }
+        guard let app = beginFinding(.search) else { return }
         asyncFind({
             ElementFinder.find(in: app).filter { !($0.title ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
         }) { [weak self] titled in
@@ -93,18 +110,21 @@ final class ModeController {
         searchBar.hide()
         matcher = nil
         armedMatcher = nil
-        scrollTarget = nil
+        scrollAreas = []
+        scrollActive = 0
         searchElements = []
         searchMatches = []
         mode = .idle
+        kind = nil
     }
 
     // MARK: background find
 
     /// Claims the active state and returns the frontmost app, or nil if busy.
-    private func beginFinding() -> NSRunningApplication? {
+    private func beginFinding(_ k: Kind) -> NSRunningApplication? {
         guard mode == .idle, let app = NSWorkspace.shared.frontmostApplication else { return nil }
         mode = .finding   // blocks re-entry while the AX query runs off the main thread
+        kind = k
         return app
     }
 
@@ -122,7 +142,7 @@ final class ModeController {
         }
     }
 
-    private func finishEmpty() { NSSound.beep(); mode = .idle }
+    private func finishEmpty() { NSSound.beep(); mode = .idle; kind = nil }
 
     // MARK: helpers
 
@@ -132,13 +152,6 @@ final class ModeController {
         matcher = HintMatcher(assignments.map { ($0.label, $0.element) })
         overlay.show(assignments)
         overlay.update(typed: "")
-    }
-
-    private func startScrolling(_ area: Element) {
-        scrollTarget = area
-        matcher = nil
-        overlay.hide()
-        mode = .scrolling
     }
 
     // MARK: key routing (runs on main run loop via the tap). Returns true to swallow.
@@ -159,9 +172,6 @@ final class ModeController {
                 self.cancel()
                 _ = Clicker.perform(action, on: element)
             }
-        }
-        case .scrollPick: return handleHintKey(code, chars, flags) { [weak self] area, _, _ in
-            self?.startScrolling(area)
         }
         case .scrolling: return handleScrollKey(code, chars, flags)
         case .search: return handleSearchKey(code, chars)
@@ -280,25 +290,56 @@ final class ModeController {
 
     private func handleScrollKey(_ code: CGKeyCode, _ chars: String, _ flags: CGEventFlags) -> Bool {
         if code == Key.escape { cancel(); return true }
-        guard let target = scrollTarget else { return false }
-        let line: Int32 = 90, page: Int32 = 450, big: Int32 = 8000
+        guard !scrollAreas.isEmpty else { return false }
         let shift = flags.contains(.maskShift)
+        if code == Key.tab { switchArea(by: shift ? -1 : 1); return true }
+        if flags.contains(.maskControl), let c = chars.lowercased().first, c == "n" || c == "p" {
+            switchArea(by: c == "n" ? 1 : -1)
+            return true
+        }
+        guard let ch = chars.first, let cmd = ScrollKeymap.command(for: ch, shift: shift) else {
+            return false   // not a scroll key — let it through
+        }
+
+        let area = scrollAreas[scrollActive]
+        let big: Int32 = 8000
         var dx: Int32 = 0, dy: Int32 = 0
-        switch chars.lowercased().first {
-        case "i": dy = line           // up        (IJKL arrows)
-        case "k": dy = -line          // down
-        case "j": dx = line           // left
-        case "l": dx = -line          // right
-        case "d": dy = -page          // half page down
-        case "u": dy = page           // half page up
-        case "g": dy = shift ? -big : big   // g = top, G = bottom
-        default: return false          // not a scroll key — let it through
+        switch cmd {
+        case .scroll(let ux, let uy):
+            let step = Int32(AppSettings.shared.scrollStep)
+            dx = Int32(ux) * step; dy = Int32(uy) * step
+        case .dash(let ux, let uy):
+            let dash = Int32(AppSettings.shared.scrollDash)
+            dx = Int32(ux) * dash; dy = Int32(uy) * dash
+        case .halfPage(let down):
+            // Half the VISIBLE height of the active area, like a paging key.
+            let vr = area.axFrame.intersection(Geometry.screensBoundsAX)
+            let half = Int32(max((vr.isNull ? 900 : vr.height) / 2, 100))
+            dy = down ? -half : half
+        case .edge(let top):
+            dy = top ? big : -big
+        case .nextArea: switchArea(by: 1); return true
+        case .prevArea: switchArea(by: -1); return true
+        case .jumpArea(let i):
+            guard i < scrollAreas.count else { NSSound.beep(); return true }
+            setActiveArea(i)
+            return true
         }
         // Scroll at the center of the VISIBLE part of the area (a tall web area's
         // true center can be off-screen).
-        let vr = target.axFrame.intersection(Geometry.screensBoundsAX)
-        let point = vr.isNull ? target.axCenter : CGPoint(x: vr.midX, y: vr.midY)
+        let vr = area.axFrame.intersection(Geometry.screensBoundsAX)
+        let point = vr.isNull ? area.axCenter : CGPoint(x: vr.midX, y: vr.midY)
         DispatchQueue.main.async { Scroller.scroll(at: point, dx: dx, dy: dy) }
         return true
+    }
+
+    private func switchArea(by delta: Int) {
+        guard scrollAreas.count > 1 else { return }
+        setActiveArea((scrollActive + delta + scrollAreas.count) % scrollAreas.count)
+    }
+
+    private func setActiveArea(_ i: Int) {
+        scrollActive = i
+        overlay.showScrollAreas(scrollAreas, active: i)
     }
 }

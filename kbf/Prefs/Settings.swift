@@ -42,6 +42,12 @@ final class AppSettings: ObservableObject {
     @Published var searchHotkey: Hotkey { didSet { write(searchHotkey, "searchHotkey") } }
     @Published var alphabet: String { didSet { defaults.set(alphabet, forKey: "alphabet") } }
     @Published var launchAtLogin: Bool { didSet { LaunchAtLogin.set(launchAtLogin) } }
+    /// Pixels per h/j/k/l press, and per ⇧-dash press.
+    @Published var scrollStep: Double { didSet { defaults.set(scrollStep, forKey: "scrollStep") } }
+    @Published var scrollDash: Double { didSet { defaults.set(scrollDash, forKey: "scrollDash") } }
+
+    static let defaultScrollStep = 90.0
+    static let defaultScrollDash = 360.0
 
     private init() {
         clickHotkey = Self.read("clickHotkey", default: Hotkey(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey)))
@@ -49,6 +55,10 @@ final class AppSettings: ObservableObject {
         searchHotkey = Self.read("searchHotkey", default: Hotkey(keyCode: UInt32(kVK_ANSI_Slash), modifiers: UInt32(optionKey)))
         alphabet = defaults.string(forKey: "alphabet") ?? String(LabelMaker.defaultAlphabet)
         launchAtLogin = LaunchAtLogin.isEnabled
+        let step = defaults.double(forKey: "scrollStep")
+        scrollStep = step > 0 ? step : Self.defaultScrollStep
+        let dash = defaults.double(forKey: "scrollDash")
+        scrollDash = dash > 0 ? dash : Self.defaultScrollDash
     }
 
     /// Alphabet as a clean character array (deduped, letters only, order preserved),
