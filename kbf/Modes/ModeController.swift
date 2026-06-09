@@ -21,9 +21,12 @@ final class ModeController {
     private var scrollActive = 0
     private var armedMatcher: HintMatcher?   // post-click window: retype the label to double-click
     private var armWork: DispatchWorkItem?
+    private var armedReturnElement: Element?  // post-click window: press ⏎ again to double-click
     private var searchElements: [Element] = []
     private var searchQuery = ""
     private var searchMatches: [Element] = []
+    private var searchLabels: [String] = []
+    private var searchLabelTyped = ""
     private var searchSelected = 0
     private var generation = 0   // invalidates in-flight background finds on cancel
 
@@ -110,10 +113,13 @@ final class ModeController {
         searchBar.hide()
         matcher = nil
         armedMatcher = nil
+        armedReturnElement = nil
         scrollAreas = []
         scrollActive = 0
         searchElements = []
         searchMatches = []
+        searchLabels = []
+        searchLabelTyped = ""
         mode = .idle
         kind = nil
     }
@@ -174,16 +180,27 @@ final class ModeController {
             }
         }
         case .scrolling: return handleScrollKey(code, chars, flags)
-        case .search: return handleSearchKey(code, chars)
+        case .search: return handleSearchKey(code, chars, flags)
         case .doubleArmed: return handleDoubleArmedKey(code, chars)
         }
     }
 
-    /// After a left click, listen briefly: retyping the same label within the system
-    /// double-click interval sends a second click (state 2) → a real double-click.
+    /// After a left click, listen briefly: repeating the trigger (the same label in
+    /// click mode, ⏎ in search mode) within the system double-click interval sends
+    /// a second click (state 2) → a real double-click.
     private func armDouble(element: Element, label: String) {
         armedMatcher = HintMatcher([(label, element)])
         mode = .doubleArmed
+        scheduleDisarm()
+    }
+
+    private func armDoubleReturn(element: Element) {
+        armedReturnElement = element
+        mode = .doubleArmed
+        scheduleDisarm()
+    }
+
+    private func scheduleDisarm() {
         let work = DispatchWorkItem { [weak self] in self?.cancel() }
         armWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + max(NSEvent.doubleClickInterval, 0.25), execute: work)
@@ -191,6 +208,12 @@ final class ModeController {
 
     private func handleDoubleArmedKey(_ code: CGKeyCode, _ chars: String) -> Bool {
         if code == Key.escape { cancel(); return true }
+        if let element = armedReturnElement {
+            guard code == Key.return else { cancel(); return false }  // disarm, let it through
+            armWork?.cancel()
+            DispatchQueue.main.async { self.cancel(); Clicker.leftClick(on: element, clickState: 2) }
+            return true
+        }
         guard let ch = chars.first, ch.isLetter, armedMatcher != nil else {
             cancel(); return false   // not a retype — disarm and let the key through
         }
@@ -206,31 +229,43 @@ final class ModeController {
         }
     }
 
-    private func handleSearchKey(_ code: CGKeyCode, _ chars: String) -> Bool {
+    /// ⏎ left-click (⏎ again = double) · ⇧⏎ right-click · ⌘⏎ command-click ·
+    /// Tab/↓/⌃N next · ⇧Tab/↑/⌃P previous · ⇧+label jump · letters refine the query.
+    private func handleSearchKey(_ code: CGKeyCode, _ chars: String, _ flags: CGEventFlags) -> Bool {
         switch code {
         case Key.escape:
             cancel()
         case Key.return:
-            if searchSelected < searchMatches.count {
-                let element = searchMatches[searchSelected]
-                DispatchQueue.main.async { self.cancel(); Clicker.perform(.left, on: element) }
+            guard searchSelected < searchMatches.count else { cancel(); return true }
+            let element = searchMatches[searchSelected]
+            if flags.contains(.maskCommand) {
+                DispatchQueue.main.async { self.cancel(); Clicker.perform(.command, on: element) }
+            } else if flags.contains(.maskShift) {
+                DispatchQueue.main.async { self.cancel(); Clicker.perform(.right, on: element) }
             } else {
-                cancel()
+                // Single click now; pressing ⏎ again within the interval double-clicks.
+                searchBar.hide()
+                overlay.hide()
+                DispatchQueue.main.async { Clicker.leftClick(on: element, clickState: 1) }
+                armDoubleReturn(element: element)
             }
         case Key.delete:
             if !searchQuery.isEmpty { searchQuery.removeLast(); refilterSearch() }
-        case Key.down, Key.tab:
-            if !searchMatches.isEmpty {
-                searchSelected = (searchSelected + 1) % searchMatches.count
-                overlay.showBoxes(searchMatches, selected: searchSelected)
-            }
+        case Key.tab:
+            moveSearchSelection(by: flags.contains(.maskShift) ? -1 : 1)
+        case Key.down:
+            moveSearchSelection(by: 1)
         case Key.up:
-            if !searchMatches.isEmpty {
-                searchSelected = (searchSelected - 1 + searchMatches.count) % searchMatches.count
-                overlay.showBoxes(searchMatches, selected: searchSelected)
-            }
+            moveSearchSelection(by: -1)
         default:
-            if let ch = chars.first, ch.isLetter || ch.isNumber || ch.isPunctuation || ch == " " {
+            guard let ch = chars.first else { return true }
+            if flags.contains(.maskControl) {
+                // ⌃N / ⌃P cycle, like Homerow; swallow other control combos.
+                if ch == "n" { moveSearchSelection(by: 1) }
+                if ch == "p" { moveSearchSelection(by: -1) }
+            } else if ch.isUppercase, flags.contains(.maskShift) {
+                jumpToLabel(ch)
+            } else if ch.isLetter || ch.isNumber || ch.isPunctuation || ch == " " {
                 searchQuery.append(ch)
                 refilterSearch()
             }
@@ -238,9 +273,32 @@ final class ModeController {
         return true   // search mode is modal: swallow everything (Esc exits)
     }
 
+    private func moveSearchSelection(by delta: Int) {
+        guard !searchMatches.isEmpty else { return }
+        searchSelected = (searchSelected + delta + searchMatches.count) % searchMatches.count
+        searchLabelTyped = ""
+        overlay.showBoxes(searchMatches, selected: searchSelected, labels: searchLabels)
+    }
+
+    /// ⇧+letters type a match's hint label; a complete label jumps the selection
+    /// to that element (labels are prefix-free, so a full match is unambiguous).
+    private func jumpToLabel(_ ch: Character) {
+        searchLabelTyped += ch.lowercased()
+        if let hit = searchLabels.firstIndex(of: searchLabelTyped) {
+            searchLabelTyped = ""
+            searchSelected = hit
+            overlay.showBoxes(searchMatches, selected: searchSelected, labels: searchLabels)
+        } else if !searchLabels.contains(where: { $0.hasPrefix(searchLabelTyped) }) {
+            searchLabelTyped = ""
+            NSSound.beep()
+        }
+    }
+
     private func refilterSearch() {
+        searchLabelTyped = ""
         if searchQuery.isEmpty {
             searchMatches = []
+            searchLabels = []
             searchSelected = 0
             searchBar.update(query: "", count: 0)
             overlay.hide()
@@ -252,9 +310,10 @@ final class ModeController {
             return (e, s)
         }
         searchMatches = Array(scored.sorted { $0.1 > $1.1 }.map(\.0).prefix(60))
+        searchLabels = LabelMaker.labels(searchMatches.count, alphabet: AppSettings.shared.alphabetChars)
         searchSelected = 0
         searchBar.update(query: searchQuery, count: searchMatches.count)
-        overlay.showBoxes(searchMatches, selected: searchSelected)
+        overlay.showBoxes(searchMatches, selected: searchSelected, labels: searchLabels)
     }
 
     /// Shared hint-typing handler for click + scroll-pick. `onMatch` is deferred

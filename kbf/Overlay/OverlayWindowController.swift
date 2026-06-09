@@ -80,23 +80,35 @@ final class OverlayWindowController {
         CATransaction.commit()
     }
 
-    /// Search mode: draw a box around each matched element, accenting the selected one.
-    func showBoxes(_ elements: [Element], selected: Int) {
+    /// Search mode: draw a box around each matched element, accenting the selected
+    /// one. When `labels` are given, each box gets a hint pill at its top-left
+    /// corner (⇧+label jumps the selection to it).
+    func showBoxes(_ elements: [Element], selected: Int, labels: [String]? = nil) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         clear()
         for (i, e) in elements.enumerated() {
             let cocoa = Geometry.axToCocoa(e.axFrame)
             guard let sp = screenPanel(at: CGPoint(x: cocoa.midX, y: cocoa.midY)) else { continue }
-            let box = CALayer()
-            box.frame = CGRect(x: cocoa.minX - sp.screen.frame.minX, y: cocoa.minY - sp.screen.frame.minY,
+            let local = CGRect(x: cocoa.minX - sp.screen.frame.minX, y: cocoa.minY - sp.screen.frame.minY,
                                width: cocoa.width, height: cocoa.height).insetBy(dx: -2, dy: -2)
+            let box = CALayer()
+            box.frame = local
             box.cornerRadius = 5
             let isSel = i == selected
             box.borderWidth = isSel ? 2.5 : 1
             box.borderColor = (isSel ? Theme.accent : NSColor.white.withAlphaComponent(0.35)).cgColor
             box.backgroundColor = isSel ? Theme.accent.withAlphaComponent(0.18).cgColor : nil
             sp.root.addSublayer(box)
+
+            if let labels, i < labels.count {
+                let size = pillSize(labels[i])
+                let badge = CGRect(x: local.minX - 3, y: local.maxY - size.height + 3,
+                                   width: size.width, height: size.height)
+                let (pill, _) = makePill(labels[i], frame: badge, scale: sp.screen.backingScaleFactor)
+                pill.opacity = isSel ? 1 : 0.85
+                sp.root.addSublayer(pill)
+            }
         }
         CATransaction.commit()
         screens.forEach { $0.panel.orderFrontRegardless() }
