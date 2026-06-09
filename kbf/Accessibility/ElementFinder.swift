@@ -1,17 +1,15 @@
 import AppKit
 import ApplicationServices
 
-/// Finds actionable elements in a running app's frontmost window.
+/// Finds actionable elements in a running app's frontmost window via a
+/// recursive AX-tree walk (a search-predicate fast path was tried and removed:
+/// it freezes on slow-AX apps — see 4a91997).
 ///
-/// Fast path: the `AXUIElementsForSearchPredicate` parameterized attribute
-/// (one traversal inside the target process). Fallback: a recursive AX-tree
-/// walk for apps whose windows don't support the predicate (e.g. Chromium,
-/// which returns `kAXErrorParameterizedAttributeUnsupported`).
-///
-/// Performance: every node's role/frame/title (and, in the walk, its children)
-/// are read in a SINGLE batched IPC call (`AX.values`), not one call per
-/// attribute. This is the difference between hundreds and thousands of
-/// round-trips for a busy web page.
+/// Performance: every node's role/frame/title (and its children) are read in
+/// a SINGLE batched IPC call (`AX.values`), not one call per attribute. This
+/// is the difference between hundreds and thousands of round-trips for a busy
+/// web page. Off-screen subtrees are pruned so cost scales with the VISIBLE
+/// elements, and a hard time budget bounds pathological apps.
 enum ElementFinder {
     /// Roles we always treat as clickable, regardless of advertised actions.
     static let actionableRoles: Set<String> = [
@@ -33,7 +31,7 @@ enum ElementFinder {
 
     private struct Node { let ax: AXUIElement; let role: String; let frame: CGRect?; let title: String? }
 
-    struct Diagnostics { let rawCount: Int; let usedFastPath: Bool; let rawRoles: [String: Int]; let pressableCount: Int }
+    struct Diagnostics { let rawCount: Int; let rawRoles: [String: Int]; let pressableCount: Int }
 
     /// Apps whose accessibility tree is lazily built and needs `AXManualAccessibility`
     /// to populate (Chromium + Electron). Native AppKit apps don't — and setting it on
@@ -74,7 +72,6 @@ enum ElementFinder {
         AX.setTimeout(root, seconds: 0.25)
 
         var nodes: [Node] = []
-        let usedFast = false
         walk(root: root, deadline: deadline, into: &nodes)
         if timing {
             print(String(format: "  timing: walk %.0fms for %d nodes",
@@ -110,8 +107,8 @@ enum ElementFinder {
         if let diagnostics {
             var roles: [String: Int] = [:]
             for n in nodes { roles[n.role.isEmpty ? "?" : n.role, default: 0] += 1 }
-            diagnostics.pointee = Diagnostics(rawCount: nodes.count, usedFastPath: usedFast,
-                                              rawRoles: roles, pressableCount: pressable)
+            diagnostics.pointee = Diagnostics(rawCount: nodes.count, rawRoles: roles,
+                                              pressableCount: pressable)
         }
         return result
     }

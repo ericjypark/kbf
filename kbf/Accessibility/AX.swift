@@ -82,25 +82,4 @@ enum AX {
     static func setTimeout(_ el: AXUIElement, seconds: Float) {
         AXUIElementSetMessagingTimeout(el, seconds)
     }
-
-    // MARK: fast search predicate
-    // Validated invocation: AnyType + DirectionNext + positive limit + start element,
-    // and crucially WITHOUT `AXVisibleOnly` (that key makes Finder return garbage).
-    // We do our own on-screen filtering instead.
-    static func searchPredicate(root: AXUIElement,
-                                searchKey: String = "AXAnyTypeSearchKey",
-                                limit: Int = 10_000) -> [AXUIElement]? {
-        let query: [String: Any] = [
-            "AXSearchKey": searchKey,
-            "AXDirection": "AXDirectionNext",
-            "AXResultsLimit": limit,
-            "AXStartElement": root,
-            "AXImmediateDescendantsOnly": false,
-        ]
-        var result: AnyObject?
-        let err = AXUIElementCopyParameterizedAttributeValue(
-            root, "AXUIElementsForSearchPredicate" as CFString, query as CFTypeRef, &result)
-        guard err == .success else { return nil }   // e.g. -25213 on Chromium → caller falls back
-        return result as? [AXUIElement]
-    }
 }

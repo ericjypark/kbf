@@ -30,10 +30,10 @@ enum DebugDump {
         print("screens: \(screens)")
 
         let start = Date()
-        var diag = ElementFinder.Diagnostics(rawCount: 0, usedFastPath: false, rawRoles: [:], pressableCount: 0)
+        var diag = ElementFinder.Diagnostics(rawCount: 0, rawRoles: [:], pressableCount: 0)
         let elements = ElementFinder.find(in: app, diagnostics: &diag)
         let ms = Int(Date().timeIntervalSince(start) * 1000)
-        print("\(app.localizedName ?? "?") (pid \(app.processIdentifier)): \(elements.count) actionable / \(diag.rawCount) raw (\(diag.pressableCount) pressable) via \(diag.usedFastPath ? "predicate" : "walk") in \(ms)ms")
+        print("\(app.localizedName ?? "?") (pid \(app.processIdentifier)): \(elements.count) actionable / \(diag.rawCount) raw (\(diag.pressableCount) pressable) in \(ms)ms")
         let roleHist = diag.rawRoles.sorted { $0.value > $1.value }.prefix(10)
             .map { "\($0.key):\($0.value)" }.joined(separator: " ")
         print("  raw roles: \(roleHist)")
