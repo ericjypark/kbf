@@ -176,8 +176,12 @@ enum ElementFinder {
     /// items. The latter require sweeping every running app for `AXExtrasMenuBar`, which
     /// is far too slow to do on every activation (~500ms), so they're served from a cache
     /// that refreshes in the background. Call `prewarmExtras()` at launch.
+    /// Items whose center is off-screen (e.g. an auto-hidden Dock's tiles) are dropped —
+    /// labeling them would float pills over nothing, and the click would miss anyway.
     static func menuBarAndDock(frontApp: NSRunningApplication) -> [Element] {
-        frontAppMenus(frontApp) + cachedExtras()
+        let bounds = Geometry.screensBoundsAX
+        return (frontAppMenus(frontApp) + cachedExtras())
+            .filter { Geometry.centerVisible($0.axFrame, in: bounds) }
     }
 
     /// Kick the background extras/Dock collection so it's ready by the first activation.

@@ -18,4 +18,16 @@ final class GeometryTests: XCTestCase {
         XCTAssertEqual(cocoa.height, r.height, accuracy: 0.01)
         XCTAssertEqual(cocoa.minX, r.minX, accuracy: 0.01)
     }
+
+    func testCenterVisible() {
+        let screen = CGRect(x: 0, y: 0, width: 2560, height: 1440)
+        // Auto-hidden Dock tile: frame hangs almost entirely below the screen.
+        XCTAssertFalse(Geometry.centerVisible(CGRect(x: 800, y: 1436, width: 64, height: 64), in: screen))
+        // Visible Dock tile: bottom edge dips a few px past the screen edge.
+        XCTAssertTrue(Geometry.centerVisible(CGRect(x: 800, y: 1380, width: 64, height: 64), in: screen))
+        // Menu bar item: fully on-screen.
+        XCTAssertTrue(Geometry.centerVisible(CGRect(x: 2000, y: 0, width: 30, height: 24), in: screen))
+        // Fully off-screen.
+        XCTAssertFalse(Geometry.centerVisible(CGRect(x: -200, y: 100, width: 50, height: 50), in: screen))
+    }
 }

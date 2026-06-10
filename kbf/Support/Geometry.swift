@@ -35,6 +35,13 @@ enum Geometry {
         NSScreen.screens.reduce(.null) { $0.union(cocoaToAX($1.frame)) }
     }
 
+    /// True when the rect's center lies inside `bounds` — used to drop UI that
+    /// reports a frame but isn't actually on screen (e.g. auto-hidden Dock tiles,
+    /// whose frames sit almost entirely below the screen edge).
+    static func centerVisible(_ r: CGRect, in bounds: CGRect) -> Bool {
+        bounds.contains(CGPoint(x: r.midX, y: r.midY))
+    }
+
     /// Clamp an AX (top-left) point to just inside the visible screens. Keeps clicks
     /// on edge elements (e.g. Dock tiles, which report frames hanging below the screen)
     /// on the actual pixels.
