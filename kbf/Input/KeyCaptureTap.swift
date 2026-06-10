@@ -30,6 +30,11 @@ final class KeyCaptureTap {
         source = nil
     }
 
+    /// Disable without tearing down the mach port / run-loop source.
+    func disable() {
+        if let t = tap { CGEvent.tapEnable(tap: t, enable: false) }
+    }
+
     private static let callback: CGEventTapCallBack = { _, type, event, userInfo in
         guard let userInfo else { return Unmanaged.passUnretained(event) }
         let me = Unmanaged<KeyCaptureTap>.fromOpaque(userInfo).takeUnretainedValue()

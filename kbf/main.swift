@@ -23,6 +23,15 @@ if let i = CommandLine.arguments.firstIndex(of: "--debug-windows") {
     exit(0)
 }
 
+// Menu-survival experiment: `kbf --debug-clickmenu <itemIndex> <bare|stop|disable|keyup|full> [AppName]`.
+if let i = CommandLine.arguments.firstIndex(of: "--debug-clickmenu") {
+    let idx = i + 1 < CommandLine.arguments.count ? Int(CommandLine.arguments[i + 1]) ?? 1 : 1
+    let mode = i + 2 < CommandLine.arguments.count ? CommandLine.arguments[i + 2] : "bare"
+    let app = i + 3 < CommandLine.arguments.count ? CommandLine.arguments[i + 3] : nil
+    DebugMenu.runClickMenu(itemIndex: idx, mode: mode, targetApp: app)
+    exit(0)
+}
+
 // Front-app dropdown diagnostics: `kbf --debug-appmenu [itemIndex]`.
 if let i = CommandLine.arguments.firstIndex(of: "--debug-appmenu") {
     let idx = i + 1 < CommandLine.arguments.count ? Int(CommandLine.arguments[i + 1]) ?? 1 : 1

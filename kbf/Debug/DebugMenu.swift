@@ -229,6 +229,82 @@ enum DebugMenu {
         }
     }
 
+    /// `kbf --debug-clickmenu <itemIndex> <mode>` — synthetically clicks the
+    /// FRONT app's menu-bar item exactly like click mode does, then polls
+    /// whether the opened menu survives. mode: "bare" (no tap), "stop" (tap
+    /// started, fully stopped 0.5s after the click — mimics the double-click
+    /// arm window), "disable" (tap disabled but run-loop source kept).
+    static func runClickMenu(itemIndex: Int, mode: String, targetApp: String? = nil) {
+        guard AccessibilityPermission.isTrusted else { print("NOT TRUSTED"); return }
+        if let name = targetApp,
+           let target = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == name }) {
+            target.activate()
+            Thread.sleep(forTimeInterval: 0.7)
+        }
+        guard let front = NSWorkspace.shared.frontmostApplication else { print("no front app"); return }
+        let axApp = AXUIElementCreateApplication(front.processIdentifier)
+        AX.setTimeout(axApp, seconds: 0.3)
+        guard let menuBar = AX.element(axApp, kAXMenuBarAttribute as String) else { print("no menu bar"); return }
+        let items = AX.elements(menuBar, kAXChildrenAttribute as String)
+        guard itemIndex < items.count, let f = AX.frame(items[itemIndex]) else { print("bad index"); return }
+        let title = AX.string(items[itemIndex], kAXTitleAttribute as String) ?? "?"
+        let el = Element(ax: items[itemIndex], role: "AXMenuBarItem", axFrame: f, title: title)
+        let own = pid_t(ProcessInfo.processInfo.processIdentifier)
+
+        let tap = KeyCaptureTap()
+        if mode == "stop" || mode == "disable" || mode == "full" {
+            tap.onKeyDown = { _, _, _ in true }
+            tap.start()
+            print("tap started")
+        }
+        print("clicking \(front.localizedName ?? "?") menu [\(itemIndex)] \(title), mode=\(mode)")
+        if mode == "axpress" {
+            Clicker.perform(.left, on: el)
+        } else {
+            Clicker.leftClick(on: el, clickState: 1)
+        }
+        let t0 = CFAbsoluteTimeGetCurrent()
+
+        if mode == "stop" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                tap.stop()
+                print(String(format: "  +%3.0fms tap STOPPED", (CFAbsoluteTimeGetCurrent() - t0) * 1000))
+            }
+        } else if mode == "disable" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                tap.disable()
+                print(String(format: "  +%3.0fms tap DISABLED", (CFAbsoluteTimeGetCurrent() - t0) * 1000))
+            }
+        } else if mode == "keyup" {
+            // Mimic the label's final key release leaking through after the click.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                CGEvent(keyboardEventSource: nil, virtualKey: 1, keyDown: false)?.post(tap: .cghidEventTap)
+                print(String(format: "  +%3.0fms stray keyUp(S) posted", (CFAbsoluteTimeGetCurrent() - t0) * 1000))
+            }
+        } else if mode == "full" {
+            // The COMPLETE click-mode sequence around the click: leaked keyUp
+            // of the typed label, then the double-click arm window expiring
+            // (tap teardown), exactly like ModeController does.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                CGEvent(keyboardEventSource: nil, virtualKey: 1, keyDown: false)?.post(tap: .cghidEventTap)
+                print(String(format: "  +%3.0fms stray keyUp(S)", (CFAbsoluteTimeGetCurrent() - t0) * 1000))
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                tap.stop()
+                print(String(format: "  +%3.0fms tap STOPPED", (CFAbsoluteTimeGetCurrent() - t0) * 1000))
+            }
+        }
+        for checkpoint in [0.2, 0.4, 0.7, 1.0, 1.4] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + checkpoint) {
+                let menus = WindowList.popupWindows(excludingPid: own).filter { $0.pid == front.processIdentifier }
+                print(String(format: "  +%3.0fms menu windows: %d", (CFAbsoluteTimeGetCurrent() - t0) * 1000, menus.count))
+            }
+        }
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 1.6))
+        sendEsc()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.3))
+    }
+
     private static func walkAll(_ el: AXUIElement, depth: Int, into out: inout [(AXUIElement, String, CGRect?)]) {
         if depth > 60 || out.count > 1500 { return }
         let role = AX.string(el, kAXRoleAttribute as String) ?? "?"
