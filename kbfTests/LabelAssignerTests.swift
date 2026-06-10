@@ -28,7 +28,7 @@ final class LabelAssignerTests: XCTestCase {
 
     func testPoolCullsSameFingerReaches() {
         let pool = Set(LabelAssigner.pool(alphabet: LabelAssigner.defaultAlphabet))
-        // f and r/t/g/v/b are all left index — slow reaches, must be culled.
+        // f and r/t/g/v are all left index — slow reaches, must be culled.
         for bad in ["fr", "ft", "fg", "fv", "rf", "ki", "ol"] {
             XCTAssertFalse(pool.contains(bad), "\(bad) is a same-finger reach")
         }
@@ -38,14 +38,35 @@ final class LabelAssignerTests: XCTestCase {
         }
     }
 
+    func testHardReachKeysNeverAppearInThePool() {
+        // q/p are pinky corners, z/x pinky-ring bottom, b a long center reach —
+        // they must never appear in any 2-char label.
+        let hard: Set<Character> = ["q", "p", "b", "x", "z"]
+        for label in LabelAssigner.pool(alphabet: LabelAssigner.defaultAlphabet) {
+            XCTAssertTrue(label.allSatisfy { !hard.contains($0) }, "\(label) uses a hard-reach key")
+        }
+    }
+
     func testPoolPrefersErgonomicPairsFirst() {
         let pool = LabelAssigner.pool(alphabet: LabelAssigner.defaultAlphabet)
         let top = pool.prefix(40)
-        // The very best slots are home-row index/middle alternations.
+        // The very best slots are resting-position index/middle alternations.
         XCTAssertTrue(top.contains("fj"))
         XCTAssertTrue(top.contains("jf"))
-        // Pinky/bottom-row pairs come much later.
-        XCTAssertFalse(top.contains("xp"))
+        XCTAssertTrue(top.contains("fk"))
+        // Lateral/stretch keys come later than resting keys.
+        XCTAssertFalse(top.contains("ty"))
+        XCTAssertFalse(top.contains("wo"))
+    }
+
+    func testAssignmentsLandInTheHashWindow() {
+        // Labels for realistic screens come only from the top of the ranking.
+        let pool = LabelAssigner.pool(alphabet: LabelAssigner.defaultAlphabet)
+        let window = Set(pool.prefix(256))
+        let result = LabelAssigner.assign(grid(150), alphabet: LabelAssigner.defaultAlphabet)
+        for r in result {
+            XCTAssertTrue(window.contains(r.label), "\(r.label) is outside the top-256 window")
+        }
     }
 
     func testPoolIsDeterministic() {
@@ -82,13 +103,18 @@ final class LabelAssignerTests: XCTestCase {
         for (pos, idx) in shuffledIdx.enumerated() {
             XCTAssertEqual(shuffled[pos].label, full[idx].label, "label must follow the position")
         }
-        // Drop half the elements → survivors keep their labels (no collisions in grid).
+        // Drop half the elements → survivors overwhelmingly keep their labels.
+        // (A survivor that was hash-colliding with a removed element may re-home —
+        // unavoidable for any unique-label scheme — but that must stay rare.)
         let survivors = els.enumerated().filter { $0.offset % 2 == 0 }.map(\.element)
         let half = LabelAssigner.assign(survivors, alphabet: LabelAssigner.defaultAlphabet)
+        var kept = 0
         for (pos, survivor) in survivors.enumerated() {
             let original = full.first { $0.element.axFrame == survivor.axFrame }!
-            XCTAssertEqual(half[pos].label, original.label)
+            if half[pos].label == original.label { kept += 1 }
         }
+        XCTAssertGreaterThanOrEqual(Double(kept), Double(survivors.count) * 0.9,
+                                    "only \(kept)/\(survivors.count) survivors kept their label")
     }
 
     func testSmallPositionDriftKeepsLabel() {

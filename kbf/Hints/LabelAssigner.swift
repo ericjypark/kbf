@@ -21,8 +21,12 @@ enum LabelAssigner {
     static func pool(alphabet: [Character]) -> [String] {
         let key = String(alphabet)
         if let c = poolCache, c.alphabet == key { return c.pool }
-        // The last char is reserved as the overflow-tier prefix.
-        let chars = alphabet.count > 3 ? Array(alphabet.dropLast()) : alphabet
+        // The last char is reserved as the overflow-tier prefix; keys that are
+        // genuinely hard to reach never make it into a label at all (they'd
+        // only return via the overflow tier, which is never hit in practice).
+        let usable = alphabet.count > 3 ? Array(alphabet.dropLast()) : alphabet
+        let easy = usable.filter { (effort[$0] ?? maxEffort) < hardThreshold }
+        let chars = easy.count >= 8 ? easy : usable
         var scored: [(label: String, score: Int)] = []
         for (i, a) in chars.enumerated() {
             for (j, b) in chars.enumerated() {
@@ -38,6 +42,20 @@ enum LabelAssigner {
 
     // MARK: QWERTY ergonomics
 
+    /// Physical reach effort per key (0 = finger at rest), in the spirit of
+    /// keyboard-layout effort grids: resting index/middle keys are free,
+    /// lateral home reaches (g/h) cost a little, t/y are stretches, b is one
+    /// of the worst keys on the board, q/p/z/x are pinky corners.
+    private static let effort: [Character: Int] = [
+        "f": 0, "j": 0, "d": 1, "k": 1, "s": 2, "l": 2, "a": 3,
+        "g": 3, "h": 3,
+        "e": 2, "i": 2, "r": 3, "u": 3, "t": 4, "w": 4, "o": 4, "y": 5, "q": 7, "p": 7,
+        "v": 4, "m": 3, "n": 3, "c": 5, "b": 7, "x": 7, "z": 8,
+    ]
+    private static let maxEffort = 8
+    /// Effort at or above this = "hard to reach" → excluded from the pool.
+    private static let hardThreshold = 6
+
     private static let homeRow = Set("asdfghjkl")
     private static let topRow = Set("qwertyuiop")
     private static let leftHand = Set("qwertasdfgzxcvb")
@@ -52,19 +70,24 @@ enum LabelAssigner {
         }
     }
 
-    private static func charScore(_ c: Character) -> Int {
-        let row = homeRow.contains(c) ? 6 : (topRow.contains(c) ? 3 : 2)
-        return row + [1, 2, 4, 4][finger(c)]
+    private static func row(_ c: Character) -> Int {
+        topRow.contains(c) ? 0 : (homeRow.contains(c) ? 1 : 2)
     }
 
     /// nil = culled (same-finger reach, e.g. "fr").
     static func pairScore(_ a: Character, _ b: Character) -> Int? {
         let sameHand = leftHand.contains(a) == leftHand.contains(b)
         if a != b, sameHand, finger(a) == finger(b) { return nil }
-        var s = charScore(a) + charScore(b)
-        if a == b { s += 4 }                                  // double-tap is fast
-        else if !sameHand { s += 5 }                          // hand alternation
-        else if abs(finger(a) - finger(b)) == 1 { s += 1 }    // adjacent-finger roll
+        let ea = effort[a] ?? maxEffort, eb = effort[b] ?? maxEffort
+        var s = (maxEffort - ea) + (maxEffort - eb)
+        if a == b {
+            s += 4                                            // double-tap is fast
+        } else if !sameHand {
+            s += 5                                            // hand alternation
+        } else {
+            if abs(finger(a) - finger(b)) == 1 { s += 1 }     // adjacent-finger roll
+            if abs(row(a) - row(b)) == 2 { s -= 2 }           // top↔bottom scissor
+        }
         return s
     }
 
@@ -82,17 +105,25 @@ enum LabelAssigner {
             if ka.x != kb.x { return ka.x < kb.x }
             return a < b
         }
+        // Hash into the top of the ranking only — labels on realistic screens
+        // come from the best combos; worse ones are reached solely by spill.
+        let window = min(256, pool.count)
         var labelOf = [Int: String](minimumCapacity: elements.count)
         var used = Set<Int>()
         var overflow = 0
         for idx in order {
-            var slot = Int(fnv(hashKey(elements[idx])) % UInt64(pool.count))
+            let home = Int(fnv(hashKey(elements[idx])) % UInt64(window))
+            var slot = home
             var steps = 0
-            while used.contains(slot), steps < pool.count {
-                slot = (slot + 1) % pool.count
+            while used.contains(slot), steps < window {
                 steps += 1
+                slot = (home + steps) % window
             }
-            if steps < pool.count {
+            if steps == window {   // window saturated — spill down the ranking
+                slot = window
+                while slot < pool.count, used.contains(slot) { slot += 1 }
+            }
+            if slot < pool.count {
                 used.insert(slot)
                 labelOf[idx] = pool[slot]
             } else if alphabet.count > 3, overflow < pool.count {
