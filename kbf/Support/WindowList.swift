@@ -45,6 +45,17 @@ enum WindowList {
         }
     }
 
+    /// True when some popup window plausibly hosts a menu with this frame:
+    /// the menu's center sits inside the window and it isn't wider than the
+    /// window. Guards against menu-bar items that expose their AXMenu (with a
+    /// real frame) even while closed.
+    static func matchesPopup(_ frame: CGRect, in popups: [Info]) -> Bool {
+        popups.contains {
+            $0.bounds.insetBy(dx: -8, dy: -8).contains(CGPoint(x: frame.midX, y: frame.midY))
+                && frame.width <= $0.bounds.width + 16
+        }
+    }
+
     private static func onScreenWindows() -> [Info] {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
                                                     kCGNullWindowID) as? [[String: Any]] else { return [] }

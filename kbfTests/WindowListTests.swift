@@ -38,6 +38,21 @@ final class WindowListTests: XCTestCase {
         XCTAssertFalse(WindowList.hasOnScreenWindow(pid: 42, near: chrome, in: []))
     }
 
+    func testMatchesPopupAcceptsHostedMenu() {
+        // Menu frame slightly inset from its hosting window.
+        let window = WindowList.Info(pid: 1, layer: 101, bounds: CGRect(x: 80, y: 60, width: 650, height: 630))
+        let menu = CGRect(x: 86, y: 66, width: 638, height: 618)
+        XCTAssertTrue(WindowList.matchesPopup(menu, in: [window]))
+    }
+
+    func testMatchesPopupRejectsClosedMenuElsewhere() {
+        // A closed menu-bar item's AXMenu reporting a frame far from any window.
+        let window = WindowList.Info(pid: 1, layer: 101, bounds: CGRect(x: 80, y: 60, width: 650, height: 630))
+        let closedMenu = CGRect(x: 1200, y: 30, width: 300, height: 400)
+        XCTAssertFalse(WindowList.matchesPopup(closedMenu, in: [window]))
+        XCTAssertFalse(WindowList.matchesPopup(closedMenu, in: []))
+    }
+
     func testPopupWindowsFilter() {
         let windows = [
             WindowList.Info(pid: 620, layer: 100, bounds: CGRect(x: 1617, y: 0, width: 570, height: 1246)),  // CC popover

@@ -16,6 +16,13 @@ if let i = CommandLine.arguments.firstIndex(of: "--debug-menu") {
     exit(0)
 }
 
+// Front-app dropdown diagnostics: `kbf --debug-appmenu [itemIndex]`.
+if let i = CommandLine.arguments.firstIndex(of: "--debug-appmenu") {
+    let idx = i + 1 < CommandLine.arguments.count ? Int(CommandLine.arguments[i + 1]) ?? 1 : 1
+    DebugMenu.runAppMenu(itemIndex: idx)
+    exit(0)
+}
+
 // Click-path diagnostics: `kbf --debug-click <App> <index>`.
 if let i = CommandLine.arguments.firstIndex(of: "--debug-click") {
     let name = i + 1 < CommandLine.arguments.count ? CommandLine.arguments[i + 1] : nil

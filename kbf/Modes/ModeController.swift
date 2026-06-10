@@ -70,7 +70,7 @@ final class ModeController {
         asyncFind({
             ElementFinder.dedupByFrame(
                 ElementFinder.find(in: app) + ElementFinder.menuBarAndDock(frontApp: app)
-                    + ElementFinder.openMenuItems() + ElementFinder.popupWindowItems())
+                    + ElementFinder.openMenuItems(frontApp: app) + ElementFinder.popupWindowItems())
         }) { [weak self] elements in
             guard let self else { return }
             guard !elements.isEmpty else { self.finishEmpty(); return }
@@ -98,7 +98,7 @@ final class ModeController {
         asyncFind({
             ElementFinder.dedupByFrame(
                 ElementFinder.find(in: app) + ElementFinder.menuBarAndDock(frontApp: app)
-                    + ElementFinder.openMenuItems() + ElementFinder.popupWindowItems())
+                    + ElementFinder.openMenuItems(frontApp: app) + ElementFinder.popupWindowItems())
                 .filter { !($0.title ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
         }) { [weak self] titled in
             guard let self else { return }

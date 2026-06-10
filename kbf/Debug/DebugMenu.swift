@@ -113,7 +113,7 @@ enum DebugMenu {
         for e in menuItems.prefix(8) { print("   · \(e.title ?? "?")") }
 
         // What click mode now merges in regardless of the frontmost app:
-        let open = ElementFinder.openMenuItems()
+        let open = ElementFinder.openMenuItems(frontApp: owner)
         print("ElementFinder.openMenuItems(): \(open.count) items")
         for e in open.prefix(12) {
             let f = e.axFrame
@@ -127,6 +127,59 @@ enum DebugMenu {
         }
 
         // Close the menu.
+        sendEsc()
+    }
+
+    /// `kbf --debug-appmenu [itemIndex]` — presses the FRONT app's menu-bar
+    /// item (default 1 = the app menu), dumps where the open dropdown lives,
+    /// then closes it.
+    static func runAppMenu(itemIndex: Int) {
+        guard AccessibilityPermission.isTrusted else {
+            print("NOT TRUSTED — grant Accessibility to the host process first.")
+            return
+        }
+        guard let front = NSWorkspace.shared.frontmostApplication else { print("no front app"); return }
+        ElementFinder.prewarmExtras()
+        Thread.sleep(forTimeInterval: 1.5)
+        let axApp = AXUIElementCreateApplication(front.processIdentifier)
+        AX.setTimeout(axApp, seconds: 0.3)
+        guard let menuBar = AX.element(axApp, kAXMenuBarAttribute as String) else {
+            print("no menu bar for \(front.localizedName ?? "?")"); return
+        }
+        let items = AX.elements(menuBar, kAXChildrenAttribute as String)
+        guard itemIndex < items.count else { print("index \(itemIndex) out of range (\(items.count))"); return }
+
+        // Do CLOSED menu-bar items expose an AXMenu child (and with what frame)?
+        print("\(front.localizedName ?? "?") menu bar, CLOSED state:")
+        for (i, it) in items.prefix(5).enumerated() {
+            let kids = AX.elements(it, kAXChildrenAttribute as String).map {
+                "\(AX.string($0, kAXRoleAttribute as String) ?? "?")\(AX.frame($0).map { f in "(\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))" } ?? "(no frame)")"
+            }
+            print("  [\(i)] \(AX.string(it, kAXTitleAttribute as String) ?? "?"): \(kids)")
+        }
+
+        let item = items[itemIndex]
+        AX.setTimeout(item, seconds: 0.3)
+        print("pressing [\(itemIndex)] \(AX.string(item, kAXTitleAttribute as String) ?? "?")…")
+        AX.perform(item, "AXPress")
+        Thread.sleep(forTimeInterval: 1.0)
+
+        for child in AX.elements(item, kAXChildrenAttribute as String) {
+            print("OPEN item child: \(AX.string(child, kAXRoleAttribute as String) ?? "?") frame=\(AX.frame(child).map { f in "(\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))" } ?? "?")")
+        }
+        print("popup windows for pid \(front.processIdentifier):")
+        for p in WindowList.popupWindows(excludingPid: pid_t(ProcessInfo.processInfo.processIdentifier))
+        where p.pid == front.processIdentifier {
+            print("  layer=\(p.layer) (\(Int(p.bounds.minX)),\(Int(p.bounds.minY)) \(Int(p.bounds.width))×\(Int(p.bounds.height)))")
+        }
+        let open = ElementFinder.openMenuItems(frontApp: front)
+        print("ElementFinder.openMenuItems(front): \(open.count) items")
+        for e in open.prefix(10) { print("   · \(e.title ?? "?")") }
+
+        sendEsc()
+    }
+
+    private static func sendEsc() {
         CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: true)?.post(tap: .cghidEventTap)
         CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: false)?.post(tap: .cghidEventTap)
         print("sent Esc")

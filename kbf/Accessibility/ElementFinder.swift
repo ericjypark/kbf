@@ -290,11 +290,14 @@ enum ElementFinder {
 
     // MARK: open menus
 
-    /// Items of any OPEN status-item menu. An open menu hangs off the menu-bar
-    /// item that spawned it — not off any window — so the focused-window walk
-    /// never sees it: check every cached status item for an `AXMenu` child and
-    /// walk those. Disabled items (separators, section headers) are skipped.
-    static func openMenuItems() -> [Element] {
+    /// Items of any OPEN menu: status-item menus plus the front app's own
+    /// menu-bar dropdowns. An open menu hangs off the menu-bar item that
+    /// spawned it — not off any window — so the focused-window walk never sees
+    /// it. Status items expose an `AXMenu` child only while open; app menu-bar
+    /// items expose theirs even when CLOSED, so those only count when a real
+    /// on-screen popup window of the app matches the menu's frame.
+    /// Disabled items (separators, section headers) are skipped.
+    static func openMenuItems(frontApp: NSRunningApplication) -> [Element] {
         let deadline = CFAbsoluteTimeGetCurrent() + 0.4
         var roots: [AXUIElement] = []
         for extra in cachedExtras() {
@@ -303,6 +306,23 @@ enum ElementFinder {
             for child in AX.elements(extra.ax, kAXChildrenAttribute as String)
             where AX.string(child, kAXRoleAttribute as String) == "AXMenu" {
                 roots.append(child)
+            }
+        }
+
+        let popups = WindowList.popupWindows(excludingPid: pid_t(ProcessInfo.processInfo.processIdentifier))
+            .filter { $0.pid == frontApp.processIdentifier }
+        if !popups.isEmpty {
+            let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
+            AX.setTimeout(axApp, seconds: 0.2)
+            if let menuBar = AX.element(axApp, kAXMenuBarAttribute as String) {
+                for item in AX.elements(menuBar, kAXChildrenAttribute as String) {
+                    if CFAbsoluteTimeGetCurrent() > deadline { break }
+                    for child in AX.elements(item, kAXChildrenAttribute as String)
+                    where AX.string(child, kAXRoleAttribute as String) == "AXMenu" {
+                        guard let mf = AX.frame(child), WindowList.matchesPopup(mf, in: popups) else { continue }
+                        roots.append(child)
+                    }
+                }
             }
         }
         guard !roots.isEmpty else { return [] }
