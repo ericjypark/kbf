@@ -67,7 +67,10 @@ final class ModeController {
 
     func enterClick() {
         guard let app = beginFinding(.click) else { return }
-        asyncFind({ ElementFinder.find(in: app) + ElementFinder.menuBarAndDock(frontApp: app) }) { [weak self] elements in
+        asyncFind({
+            ElementFinder.find(in: app) + ElementFinder.menuBarAndDock(frontApp: app)
+                + ElementFinder.openMenuItems()
+        }) { [weak self] elements in
             guard let self else { return }
             guard !elements.isEmpty else { self.finishEmpty(); return }
             self.showHints(elements)
@@ -92,7 +95,9 @@ final class ModeController {
     func enterSearch() {
         guard let app = beginFinding(.search) else { return }
         asyncFind({
-            ElementFinder.find(in: app).filter { !($0.title ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
+            (ElementFinder.find(in: app) + ElementFinder.menuBarAndDock(frontApp: app)
+                + ElementFinder.openMenuItems())
+                .filter { !($0.title ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
         }) { [weak self] titled in
             guard let self else { return }
             guard !titled.isEmpty else { self.finishEmpty(); return }

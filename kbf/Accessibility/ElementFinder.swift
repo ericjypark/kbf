@@ -256,6 +256,45 @@ enum ElementFinder {
         }
     }
 
+    // MARK: open menus
+
+    /// Items of any OPEN status-item menu. An open menu hangs off the menu-bar
+    /// item that spawned it — not off any window — so the focused-window walk
+    /// never sees it: check every cached status item for an `AXMenu` child and
+    /// walk those. Disabled items (separators, section headers) are skipped.
+    static func openMenuItems() -> [Element] {
+        let deadline = CFAbsoluteTimeGetCurrent() + 0.4
+        var roots: [AXUIElement] = []
+        for extra in cachedExtras() {
+            if CFAbsoluteTimeGetCurrent() > deadline { break }
+            AX.setTimeout(extra.ax, seconds: 0.1)
+            for child in AX.elements(extra.ax, kAXChildrenAttribute as String)
+            where AX.string(child, kAXRoleAttribute as String) == "AXMenu" {
+                roots.append(child)
+            }
+        }
+        guard !roots.isEmpty else { return [] }
+
+        let bounds = Geometry.screensBounds
+        var seen = Set<String>()
+        var out: [Element] = []
+        for root in roots {
+            var nodes: [Node] = []
+            walkChild(root, depth: 1, clip: nil, deadline: CFAbsoluteTimeGetCurrent() + 0.3, into: &nodes)
+            for n in nodes {
+                guard n.role == "AXMenuItem",
+                      let f = n.frame, f.width >= 4, f.height >= 4,
+                      bounds.intersects(Geometry.axToCocoa(f)),
+                      AX.value(n.ax, kAXEnabledAttribute as String) as? Bool != false else { continue }
+                let key = "\(Int(f.minX)),\(Int(f.minY)),\(Int(f.width)),\(Int(f.height))"
+                if seen.insert(key).inserted {
+                    out.append(Element(ax: n.ax, role: n.role, axFrame: f, title: n.title))
+                }
+            }
+        }
+        return out
+    }
+
     private static func makeNode(_ el: AXUIElement) -> Node {
         let v = AX.values(el, nodeAttrs)
         return Node(ax: el, role: v[0] as? String ?? "", frame: AX.rect(v[1], v[2]),
