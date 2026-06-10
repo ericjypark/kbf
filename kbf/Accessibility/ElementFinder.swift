@@ -66,7 +66,16 @@ enum ElementFinder {
 
         let timing = ProcessInfo.processInfo.environment["KBF_TIMING"] != nil
         let t0 = CFAbsoluteTimeGetCurrent()
-        let root = AX.element(axApp, kAXFocusedWindowAttribute as String) ?? axApp
+        let focused = AX.element(axApp, kAXFocusedWindowAttribute as String)
+        // ⌘Tab can make an app frontmost without switching to its Space; labeling
+        // a window that isn't on the active Space would paint ghost pills over the
+        // wrong desktop. Skip its contents (menu bar/Dock/open menus still work).
+        if let focused, let wf = AX.frame(focused),
+           !WindowList.hasOnScreenWindow(pid: app.processIdentifier, near: wf) {
+            diagnostics?.pointee = Diagnostics(rawCount: 0, rawRoles: [:], pressableCount: 0)
+            return []
+        }
+        let root = focused ?? axApp
         // Bound calls on the window element too — the messaging timeout is per-element,
         // so setting it on axApp alone doesn't cover the window or its children.
         AX.setTimeout(root, seconds: 0.25)
@@ -128,7 +137,12 @@ enum ElementFinder {
         if needsManualAccessibility(app) {
             AX.setValue(axApp, "AXManualAccessibility", kCFBooleanTrue)
         }
-        let root = AX.element(axApp, kAXFocusedWindowAttribute as String) ?? axApp
+        let focused = AX.element(axApp, kAXFocusedWindowAttribute as String)
+        if let focused, let wf = AX.frame(focused),
+           !WindowList.hasOnScreenWindow(pid: app.processIdentifier, near: wf) {
+            return []   // focused window is on another Space — nothing to scroll here
+        }
+        let root = focused ?? axApp
         let visible = Geometry.screensBoundsAX
         var found: [Element] = []
         collectScroll(root, depth: 0, visible: visible, into: &found)
