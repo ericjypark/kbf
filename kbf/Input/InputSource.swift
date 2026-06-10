@@ -1,30 +1,45 @@
 import Carbon
 
-/// Forces an ASCII-capable keyboard layout while a mode is active. The key
-/// tap reads characters through the live layout, so a Korean/Japanese/…
-/// input source turns typed hint labels into jamo/kana that never match.
-/// The user's layout is restored when the mode ends. Main thread only.
+/// Keycode→ASCII translation for non-ASCII input sources (Korean, Japanese, …).
+///
+/// The key tap reads characters through the live layout, so with an IME active
+/// the typed hint labels arrive as jamo/kana and never match. Switching the
+/// system input source (and reverting on exit) fixes that but is invasive: the
+/// revert resets the focused field's IME context, which dismisses popups
+/// anchored to inputs. Instead, while a non-ASCII source is active, keys are
+/// translated through the user's ASCII-capable layout — the system input
+/// source is never touched.
 enum InputSource {
-    private static var saved: TISInputSource?
-
-    /// Switch to the most recent ASCII-capable layout, remembering the
-    /// current one. No-op if the current layout already types ASCII
-    /// (so Dvorak/Colemak users are left alone).
-    static func forceASCII() {
-        guard saved == nil,
-              let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
-              !isASCIICapable(current),
-              let ascii = TISCopyCurrentASCIICapableKeyboardInputSource()?.takeRetainedValue()
-        else { return }
-        saved = current
-        TISSelectInputSource(ascii)
+    /// The characters this key would produce on the user's ASCII layout, or
+    /// nil when the current source already types ASCII (caller uses the event
+    /// string as-is — keeps Dvorak/Colemak untouched). Main thread only.
+    static func asciiOverrideChars(keyCode: CGKeyCode, shift: Bool) -> String? {
+        guard let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+              !isASCIICapable(current) else { return nil }
+        return translateToASCII(keyCode: keyCode, shift: shift)
     }
 
-    /// Restore the layout saved by `forceASCII` (no-op if none was switched).
-    static func restore() {
-        guard let source = saved else { return }
-        saved = nil
-        TISSelectInputSource(source)
+    /// 'uchr' data of the most recent ASCII-capable layout, fetched lazily and
+    /// kept alive for the process lifetime.
+    private static let asciiLayoutData: CFData? = {
+        guard let src = TISCopyCurrentASCIICapableKeyboardInputSource()?.takeRetainedValue(),
+              let ptr = TISGetInputSourceProperty(src, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+        return Unmanaged<CFData>.fromOpaque(ptr).takeUnretainedValue()
+    }()
+
+    static func translateToASCII(keyCode: CGKeyCode, shift: Bool) -> String? {
+        guard let data = asciiLayoutData,
+              let bytes = CFDataGetBytePtr(data) else { return nil }
+        let layout = UnsafeRawPointer(bytes).assumingMemoryBound(to: UCKeyboardLayout.self)
+        var deadKeys: UInt32 = 0
+        var chars = [UniChar](repeating: 0, count: 4)
+        var length = 0
+        let mods: UInt32 = shift ? UInt32(shiftKey >> 8) : 0
+        let err = UCKeyTranslate(layout, UInt16(keyCode), UInt16(kUCKeyActionDown), mods,
+                                 UInt32(LMGetKbdType()), UInt32(1 << kUCKeyTranslateNoDeadKeysBit),
+                                 &deadKeys, chars.count, &length, &chars)
+        guard err == noErr, length > 0 else { return nil }
+        return String(utf16CodeUnits: chars, count: length)
     }
 
     private static func isASCIICapable(_ source: TISInputSource) -> Bool {

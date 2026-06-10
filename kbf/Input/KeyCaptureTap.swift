@@ -41,15 +41,23 @@ final class KeyCaptureTap {
         guard type == .keyDown else { return Unmanaged.passUnretained(event) }
 
         let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
-        var length = 0
-        var buffer = [UniChar](repeating: 0, count: 4)
-        // Extract the base character with ⌘/⌥/⌃ stripped (keep Shift) so a held
-        // modifier — used to choose a click variant — doesn't mangle the hint
-        // letter (⌥f would otherwise be "ƒ"). The real flags are passed through.
-        let probe = event.copy()
-        probe?.flags = event.flags.subtracting([.maskCommand, .maskAlternate, .maskControl])
-        (probe ?? event).keyboardGetUnicodeString(maxStringLength: 4, actualStringLength: &length, unicodeString: &buffer)
-        let chars = String(utf16CodeUnits: buffer, count: length)
+        let chars: String
+        if let ascii = InputSource.asciiOverrideChars(keyCode: keyCode,
+                                                      shift: event.flags.contains(.maskShift)) {
+            // A non-ASCII source (Korean, Japanese, …) is active: read the key
+            // through the user's ASCII layout so hint labels still match.
+            chars = ascii
+        } else {
+            var length = 0
+            var buffer = [UniChar](repeating: 0, count: 4)
+            // Extract the base character with ⌘/⌥/⌃ stripped (keep Shift) so a held
+            // modifier — used to choose a click variant — doesn't mangle the hint
+            // letter (⌥f would otherwise be "ƒ"). The real flags are passed through.
+            let probe = event.copy()
+            probe?.flags = event.flags.subtracting([.maskCommand, .maskAlternate, .maskControl])
+            (probe ?? event).keyboardGetUnicodeString(maxStringLength: 4, actualStringLength: &length, unicodeString: &buffer)
+            chars = String(utf16CodeUnits: buffer, count: length)
+        }
 
         let swallow = me.onKeyDown?(keyCode, chars, event.flags) ?? false
         return swallow ? nil : Unmanaged.passUnretained(event)

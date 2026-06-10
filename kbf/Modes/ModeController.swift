@@ -116,7 +116,6 @@ final class ModeController {
         generation += 1   // discard any in-flight find
         armWork?.cancel(); armWork = nil
         Scroller.stopAnimation()
-        InputSource.restore()
         keyTap.stop()
         overlay.hide()
         searchBar.hide()
@@ -140,7 +139,6 @@ final class ModeController {
     private func beginFinding(_ k: Kind) -> NSRunningApplication? {
         guard mode == .idle, let app = NSWorkspace.shared.frontmostApplication else { return nil }
         guard !AppSettings.shared.isExcluded(app.bundleIdentifier) else { NSSound.beep(); return nil }
-        InputSource.forceASCII()   // typed labels must arrive as ASCII; restored on exit
         mode = .finding   // blocks re-entry while the AX query runs off the main thread
         kind = k
         return app
@@ -160,7 +158,7 @@ final class ModeController {
         }
     }
 
-    private func finishEmpty() { NSSound.beep(); InputSource.restore(); mode = .idle; kind = nil }
+    private func finishEmpty() { NSSound.beep(); mode = .idle; kind = nil }
 
     // MARK: helpers
 
