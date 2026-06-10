@@ -25,8 +25,7 @@ enum DemoOverlay {
         guard let app else { print("app not found"); return }
 
         let elements = ElementFinder.find(in: app)
-        let labels = LabelMaker.labels(elements.count)
-        let assignments = zip(labels, elements).map { (label: $0, element: $1) }
+        let assignments = LabelAssigner.assign(elements, alphabet: LabelAssigner.defaultAlphabet)
         let o = OverlayWindowController()
         o.show(assignments)
         o.update(typed: "")

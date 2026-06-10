@@ -163,8 +163,7 @@ final class ModeController {
     // MARK: helpers
 
     private func showHints(_ elements: [Element]) {
-        let labels = LabelMaker.labels(elements.count, alphabet: AppSettings.shared.alphabetChars)
-        let assignments = zip(labels, elements).map { (label: $0, element: $1) }
+        let assignments = LabelAssigner.assign(elements, alphabet: AppSettings.shared.alphabetChars)
         matcher = HintMatcher(assignments.map { ($0.label, $0.element) })
         overlay.show(assignments)
         overlay.update(typed: "")
@@ -335,7 +334,7 @@ final class ModeController {
             return (e, s)
         }
         searchMatches = Array(scored.sorted { $0.1 > $1.1 }.map(\.0).prefix(60))
-        searchLabels = LabelMaker.labels(searchMatches.count, alphabet: AppSettings.shared.alphabetChars)
+        searchLabels = LabelAssigner.assign(searchMatches, alphabet: AppSettings.shared.alphabetChars).map(\.label)
         searchSelected = 0
         searchBar.update(query: searchQuery, count: searchMatches.count)
         overlay.showBoxes(searchMatches, selected: searchSelected, labels: searchLabels)

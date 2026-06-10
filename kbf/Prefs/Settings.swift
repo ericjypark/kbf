@@ -58,7 +58,7 @@ final class AppSettings: ObservableObject {
         clickHotkey = Self.read("clickHotkey", default: Hotkey(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey)))
         scrollHotkey = Self.read("scrollHotkey", default: Hotkey(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey | shiftKey)))
         searchHotkey = Self.read("searchHotkey", default: Hotkey(keyCode: UInt32(kVK_ANSI_Slash), modifiers: UInt32(optionKey)))
-        alphabet = defaults.string(forKey: "alphabet") ?? String(LabelMaker.defaultAlphabet)
+        alphabet = defaults.string(forKey: "alphabet") ?? String(LabelAssigner.defaultAlphabet)
         launchAtLogin = LaunchAtLogin.isEnabled
         let step = defaults.double(forKey: "scrollStep")
         scrollStep = step > 0 ? step : Self.defaultScrollStep
@@ -71,13 +71,14 @@ final class AppSettings: ObservableObject {
     }
 
     /// Alphabet as a clean character array (deduped, letters only, order preserved),
-    /// falling back to the default if too short.
+    /// falling back to the default if too short for the 2-char label pool
+    /// (one char is reserved for the overflow tier).
     var alphabetChars: [Character] { Self.sanitizedAlphabet(alphabet) }
 
     static func sanitizedAlphabet(_ raw: String) -> [Character] {
         var seen = Set<Character>(), out: [Character] = []
         for c in raw.lowercased() where c.isLetter && seen.insert(c).inserted { out.append(c) }
-        return out.count >= 2 ? out : LabelMaker.defaultAlphabet
+        return out.count >= 4 ? out : LabelAssigner.defaultAlphabet
     }
 
     func isExcluded(_ bundleID: String?) -> Bool { Self.matchesExclusion(bundleID, in: excludedApps) }

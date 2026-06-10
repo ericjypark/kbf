@@ -39,12 +39,13 @@ final class SettingsTests: XCTestCase {
     // MARK: alphabet sanitization
 
     func testAlphabetSanitizationDedupesAndKeepsOrder() {
-        XCTAssertEqual(AppSettings.sanitizedAlphabet("aAbb1c!"), ["a", "b", "c"])
+        XCTAssertEqual(AppSettings.sanitizedAlphabet("aAbb1c!d"), ["a", "b", "c", "d"])
     }
 
     func testAlphabetTooShortFallsBackToDefault() {
-        XCTAssertEqual(AppSettings.sanitizedAlphabet("x"), LabelMaker.defaultAlphabet)
-        XCTAssertEqual(AppSettings.sanitizedAlphabet(""), LabelMaker.defaultAlphabet)
+        // Fewer than 4 letters can't sustain the 2-char pool + overflow prefix.
+        XCTAssertEqual(AppSettings.sanitizedAlphabet("abc"), LabelAssigner.defaultAlphabet)
+        XCTAssertEqual(AppSettings.sanitizedAlphabet(""), LabelAssigner.defaultAlphabet)
     }
 }
 

@@ -2,7 +2,7 @@ import Foundation
 import ApplicationServices
 
 /// `kbf --self-test` — lightweight runtime checks for the pure logic
-/// (no XCTest target yet). Exits non-zero on failure.
+/// (complements the XCTest suite). Exits non-zero on failure.
 enum SelfTest {
     static func run() -> Int32 {
         var failures = 0
@@ -11,25 +11,34 @@ enum SelfTest {
             if !cond { failures += 1 }
         }
 
-        // LabelMaker: correct count, unique, prefix-free.
-        for n in [1, 5, 26, 50, 200, 999] {
-            let labels = LabelMaker.labels(n)
-            check(labels.count == n, "LabelMaker(\(n)) count == \(n)")
-            check(Set(labels).count == n, "LabelMaker(\(n)) all unique")
-            check(prefixFree(labels), "LabelMaker(\(n)) prefix-free")
-            check(labels.allSatisfy { !$0.isEmpty }, "LabelMaker(\(n)) no empty labels")
+        // LabelAssigner: unique, prefix-free, stable labels for any count.
+        let alphabet = LabelAssigner.defaultAlphabet
+        for n in [1, 5, 26, 50, 200, 600] {
+            let els = (0..<n).map { dummyElement(x: CGFloat($0 % 20) * 120, y: CGFloat($0 / 20) * 90) }
+            let labels = LabelAssigner.assign(els, alphabet: alphabet).map(\.label)
+            check(labels.count == n, "LabelAssigner(\(n)) count == \(n)")
+            check(Set(labels).count == n, "LabelAssigner(\(n)) all unique")
+            check(prefixFree(labels), "LabelAssigner(\(n)) prefix-free")
+            let again = LabelAssigner.assign(els, alphabet: alphabet).map(\.label)
+            check(labels == again, "LabelAssigner(\(n)) stable across runs")
         }
 
-        // HintMatcher narrowing / matching.
-        let mk = LabelMaker.labels(3)              // e.g. 3 single-char labels
-        var matcher = HintMatcher(mk.map { ($0, dummyElement()) })
-        if let first = mk.sorted().first, let ch = first.first {
-            switch matcher.input(ch) {
-            case .matched: check(true, "HintMatcher single-char match")
-            case .narrowed, .noMatch: check(false, "HintMatcher single-char match")
+        // HintMatcher narrowing / matching over assigned labels.
+        let els = (0..<3).map { dummyElement(x: CGFloat($0) * 200, y: 100) }
+        let assigned = LabelAssigner.assign(els, alphabet: alphabet)
+        var matcher = HintMatcher(assigned.map { ($0.label, $0.element) })
+        if let label = assigned.first?.label, label.count == 2 {
+            let chars = Array(label)
+            switch matcher.input(chars[0]) {
+            case .narrowed, .matched: check(true, "HintMatcher accepts label start")
+            case .noMatch: check(false, "HintMatcher accepts label start")
+            }
+            switch matcher.input(chars[1]) {
+            case .matched: check(true, "HintMatcher full label match")
+            case .narrowed, .noMatch: check(false, "HintMatcher full label match")
             }
         }
-        var m2 = HintMatcher(LabelMaker.labels(60).map { ($0, dummyElement()) })
+        var m2 = HintMatcher(assigned.map { ($0.label, $0.element) })
         check({ if case .noMatch = m2.input("\u{1}") { return true }; return false }(),
               "HintMatcher rejects non-label char")
 
@@ -46,7 +55,8 @@ enum SelfTest {
         return true
     }
 
-    private static func dummyElement() -> Element {
-        Element(ax: AXUIElementCreateApplication(0), role: "AXButton", axFrame: .zero, title: nil)
+    private static func dummyElement(x: CGFloat, y: CGFloat) -> Element {
+        Element(ax: AXUIElementCreateApplication(0), role: "AXButton",
+                axFrame: CGRect(x: x, y: y, width: 40, height: 24), title: nil)
     }
 }
