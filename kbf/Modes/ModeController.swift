@@ -178,13 +178,16 @@ final class ModeController {
         case .clickHints: return handleHintKey(code, chars, flags) { [weak self] element, flags, label in
             guard let self else { return }
             let action = ModeController.clickAction(for: flags)
-            if action == .left {
+            if action == .left, !ModeController.opensTransientUI(element.role) {
                 // Single click now; keep listening so retyping the label double-clicks.
                 self.overlay.hide()
                 self.matcher = nil
                 Clicker.leftClick(on: element, clickState: 1)
                 self.armDouble(element: element, label: label)
             } else {
+                // Menu-opening elements: end the mode fully BEFORE the click so
+                // nothing of ours lingers around the tracking menu — and skip
+                // double-click arming (double-clicking a menu just closes it).
                 self.cancel()
                 _ = Clicker.perform(action, on: element)
             }
@@ -193,6 +196,11 @@ final class ModeController {
         case .search: return handleSearchKey(code, chars, flags)
         case .doubleArmed: return handleDoubleArmedKey(code, chars)
         }
+    }
+
+    /// Roles that open menus/popovers on click — never double-click-armed.
+    private static func opensTransientUI(_ role: String) -> Bool {
+        ["AXMenuBarItem", "AXMenuExtra", "AXMenuItem", "AXPopUpButton", "AXMenuButton"].contains(role)
     }
 
     /// After a left click, listen briefly: repeating the trigger (the same label in
@@ -252,6 +260,8 @@ final class ModeController {
                 DispatchQueue.main.async { self.cancel(); Clicker.perform(.command, on: element) }
             } else if flags.contains(.maskShift) {
                 DispatchQueue.main.async { self.cancel(); Clicker.perform(.right, on: element) }
+            } else if ModeController.opensTransientUI(element.role) {
+                DispatchQueue.main.async { self.cancel(); Clicker.perform(.left, on: element) }
             } else {
                 // Single click now; pressing ⏎ again within the interval double-clicks.
                 searchBar.hide()
