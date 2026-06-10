@@ -184,4 +184,58 @@ enum DebugMenu {
         CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: false)?.post(tap: .cghidEventTap)
         print("sent Esc")
     }
+
+    /// `kbf --debug-windows <AppName>` — walks EVERY AXWindow of the app and
+    /// prints a role histogram plus, for roles the finder ignores, samples
+    /// with their advertised actions. For diagnosing "this window's contents
+    /// don't get labels".
+    static func runWindows(appName: String?) {
+        guard AccessibilityPermission.isTrusted else {
+            print("NOT TRUSTED — grant Accessibility to the host process first.")
+            return
+        }
+        guard let name = appName,
+              let app = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == name }) else {
+            print("app \(appName ?? "?") not running")
+            return
+        }
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        AX.setTimeout(axApp, seconds: 0.3)
+        let windows = AX.elements(axApp, kAXWindowsAttribute as String)
+        print("\(name): \(windows.count) AXWindows")
+        for (i, win) in windows.enumerated() {
+            let f = AX.frame(win)
+            print("window [\(i)] \(AX.string(win, kAXSubroleAttribute as String) ?? "?") \(f.map { "(\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))×\(Int($0.height)))" } ?? "no frame")")
+            var nodes: [(AXUIElement, String, CGRect?)] = []
+            walkAll(win, depth: 0, into: &nodes)
+            var roles: [String: Int] = [:]
+            for n in nodes { roles[n.1, default: 0] += 1 }
+            print("  roles: \(roles.sorted { $0.value > $1.value }.map { "\($0.key):\($0.value)" }.joined(separator: " "))")
+            // Sample elements the finder would IGNORE (role not actionable),
+            // sized like real controls — print their actions so we can see
+            // what role/action combination the app uses.
+            var shown = 0
+            for (el, role, frame) in nodes where shown < 12 {
+                guard !ElementFinder.actionableRoles.contains(role),
+                      let fr = frame, fr.width >= 24, fr.height >= 24, fr.width <= 400, fr.height <= 400
+                else { continue }
+                let actions = AX.actions(el)
+                guard role != "AXGroup" || !actions.isEmpty else { continue }   // skip inert layout groups
+                let title = AX.string(el, kAXTitleAttribute as String)
+                    ?? AX.string(el, kAXDescriptionAttribute as String) ?? ""
+                print("  ignored: \(role) (\(Int(fr.minX)),\(Int(fr.minY)) \(Int(fr.width))×\(Int(fr.height))) actions=\(actions.sorted()) \(title)")
+                shown += 1
+            }
+        }
+    }
+
+    private static func walkAll(_ el: AXUIElement, depth: Int, into out: inout [(AXUIElement, String, CGRect?)]) {
+        if depth > 60 || out.count > 1500 { return }
+        let role = AX.string(el, kAXRoleAttribute as String) ?? "?"
+        out.append((el, role, AX.frame(el)))
+        for c in AX.elements(el, kAXChildrenAttribute as String) {
+            walkAll(c, depth: depth + 1, into: &out)
+            if out.count > 1500 { return }
+        }
+    }
 }

@@ -16,6 +16,13 @@ if let i = CommandLine.arguments.firstIndex(of: "--debug-menu") {
     exit(0)
 }
 
+// Per-window role diagnostics: `kbf --debug-windows <AppName>`.
+if let i = CommandLine.arguments.firstIndex(of: "--debug-windows") {
+    let name = i + 1 < CommandLine.arguments.count ? CommandLine.arguments[i + 1] : nil
+    DebugMenu.runWindows(appName: name)
+    exit(0)
+}
+
 // Front-app dropdown diagnostics: `kbf --debug-appmenu [itemIndex]`.
 if let i = CommandLine.arguments.firstIndex(of: "--debug-appmenu") {
     let idx = i + 1 < CommandLine.arguments.count ? Int(CommandLine.arguments[i + 1]) ?? 1 : 1
