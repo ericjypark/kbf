@@ -1,11 +1,12 @@
 import AppKit
 import ApplicationServices
 
-/// `kbf --debug-menu <AppName>` — reproduction harness for "open menu items
-/// aren't labeled": programmatically opens the app's status-item menu, dumps
-/// what the finder (and the AX focus attributes) see, then closes the menu.
+/// `kbf --debug-menu <AppName> [itemIndex]` — reproduction harness for "open
+/// popup items aren't labeled": lists the app's status items (no index given),
+/// or opens the chosen one, dumps what the finder (and the AX focus attributes)
+/// see, then closes it.
 enum DebugMenu {
-    static func run(appName: String?) {
+    static func run(appName: String?, itemIndex: Int?) {
         guard AccessibilityPermission.isTrusted else {
             print("NOT TRUSTED — grant Accessibility to the host process first.")
             return
@@ -19,11 +20,21 @@ enum DebugMenu {
         Thread.sleep(forTimeInterval: 1.5)
         let axOwner = AXUIElementCreateApplication(owner.processIdentifier)
         AX.setTimeout(axOwner, seconds: 0.3)
-        guard let extras = AX.element(axOwner, "AXExtrasMenuBar"),
-              let item = AX.elements(extras, kAXChildrenAttribute as String).first else {
-            print("no status item for \(name)")
+        guard let extras = AX.element(axOwner, "AXExtrasMenuBar") else {
+            print("no extras menu bar for \(name)")
             return
         }
+        let items = AX.elements(extras, kAXChildrenAttribute as String)
+        guard let idx = itemIndex else {
+            print("status items of \(name) — rerun with an index to press one:")
+            for (i, it) in items.enumerated() {
+                let f = AX.frame(it)
+                print("  [\(i)] \(AX.string(it, kAXTitleAttribute as String) ?? AX.string(it, kAXDescriptionAttribute as String) ?? "?")  \(f.map { "(\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))×\(Int($0.height)))" } ?? "")")
+            }
+            return
+        }
+        guard idx < items.count else { print("index \(idx) out of range (\(items.count) items)"); return }
+        let item = items[idx]
         AX.setTimeout(item, seconds: 0.3)
         print("status item actions: \(AX.actions(item))")
         print("pressing status item of \(name)… (call may time out while the menu tracks)")
@@ -58,9 +69,25 @@ enum DebugMenu {
         let appKids = AX.elements(axOwner, kAXChildrenAttribute as String)
         print("owner app children roles: \(appKids.map { AX.string($0, kAXRoleAttribute as String) ?? "?" })")
         let windows = AX.elements(axOwner, kAXWindowsAttribute as String)
-        print("owner windows: \(windows.map { "\(AX.string($0, kAXRoleAttribute as String) ?? "?")/\(AX.string($0, kAXSubroleAttribute as String) ?? "?")" })")
+        print("owner windows:")
+        for w in windows {
+            let f = AX.frame(w)
+            print("  \(AX.string(w, kAXRoleAttribute as String) ?? "?")/\(AX.string(w, kAXSubroleAttribute as String) ?? "?")  \(f.map { "(\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))×\(Int($0.height)))" } ?? "no frame")")
+        }
         let itemKids = AX.elements(item, kAXChildrenAttribute as String)
         print("status item children roles: \(itemKids.map { AX.string($0, kAXRoleAttribute as String) ?? "?" })")
+
+        // Window-server view: every on-screen window the owner has (layer reveals popups).
+        if let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] {
+            print("CGWindowList rows for pid \(owner.processIdentifier):")
+            for w in list where w[kCGWindowOwnerPID as String] as? pid_t == owner.processIdentifier {
+                let layer = w[kCGWindowLayer as String] as? Int ?? -1
+                let alpha = w[kCGWindowAlpha as String] as? Double ?? -1
+                let dict = w[kCGWindowBounds as String] as? NSDictionary
+                let b = dict.flatMap { CGRect(dictionaryRepresentation: $0) } ?? .zero
+                print("  layer=\(layer) alpha=\(String(format: "%.1f", alpha)) (\(Int(b.minX)),\(Int(b.minY)) \(Int(b.width))×\(Int(b.height)))")
+            }
+        }
 
         // Sweep every running app: who has an AXMenu child on its app element?
         for running in NSWorkspace.shared.runningApplications {
@@ -91,6 +118,12 @@ enum DebugMenu {
         for e in open.prefix(12) {
             let f = e.axFrame
             print("   · (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))  \(e.title ?? "?")")
+        }
+        let popupItems = ElementFinder.popupWindowItems()
+        print("ElementFinder.popupWindowItems(): \(popupItems.count) items")
+        for e in popupItems.prefix(14) {
+            let f = e.axFrame
+            print("   · \(e.role)  (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))  \(e.title ?? "?")")
         }
 
         // Close the menu.

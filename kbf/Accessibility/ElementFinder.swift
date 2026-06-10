@@ -87,8 +87,24 @@ enum ElementFinder {
                          (CFAbsoluteTimeGetCurrent() - t0) * 1000, nodes.count))
         }
 
-        let bounds = Geometry.screensBounds
         var seen = Set<String>()
+        let (result, pressable) = actionable(nodes, deadline: deadline, seen: &seen)
+
+        if let diagnostics {
+            var roles: [String: Int] = [:]
+            for n in nodes { roles[n.role.isEmpty ? "?" : n.role, default: 0] += 1 }
+            diagnostics.pointee = Diagnostics(rawCount: nodes.count, rawRoles: roles,
+                                              pressableCount: pressable)
+        }
+        return result
+    }
+
+    /// Role/geometry filter shared by the window walk and popup-window walks:
+    /// on-screen, sensibly sized, actionable role (or pressable), de-duped by
+    /// frame (web content often reports stacked duplicates).
+    private static func actionable(_ nodes: [Node], deadline: CFTimeInterval,
+                                   seen: inout Set<String>) -> ([Element], Int) {
+        let bounds = Geometry.screensBounds
         var result: [Element] = []
         var pressable = 0
         for n in nodes {
@@ -106,20 +122,22 @@ enum ElementFinder {
                 keep = false
             }
             guard keep else { continue }
-            // de-dup elements reporting the exact same frame (common in web content)
             let key = "\(Int(f.minX)),\(Int(f.minY)),\(Int(f.width)),\(Int(f.height))"
             if seen.insert(key).inserted {
                 result.append(Element(ax: n.ax, role: n.role, axFrame: f, title: n.title))
             }
         }
+        return (result, pressable)
+    }
 
-        if let diagnostics {
-            var roles: [String: Int] = [:]
-            for n in nodes { roles[n.role.isEmpty ? "?" : n.role, default: 0] += 1 }
-            diagnostics.pointee = Diagnostics(rawCount: nodes.count, rawRoles: roles,
-                                              pressableCount: pressable)
+    /// Drop elements reporting the same frame — merged sources (window walk,
+    /// menu bar, open menus, popup windows) can overlap.
+    static func dedupByFrame(_ elements: [Element]) -> [Element] {
+        var seen = Set<String>()
+        return elements.filter {
+            let f = $0.axFrame
+            return seen.insert("\(Int(f.minX)),\(Int(f.minY)),\(Int(f.width)),\(Int(f.height))").inserted
         }
-        return result
     }
 
     // MARK: scroll areas (for scroll mode)
@@ -304,6 +322,36 @@ enum ElementFinder {
                 if seen.insert(key).inserted {
                     out.append(Element(ax: n.ax, role: n.role, axFrame: f, title: n.title))
                 }
+            }
+        }
+        return out
+    }
+
+    /// Items inside open popup WINDOWS: Control Center popovers (battery,
+    /// Wi-Fi, Now Playing), floating panels hung off status items. These are
+    /// real windows above the normal layer — found via the window server,
+    /// matched to the owning app's `AXWindow` by frame, then walked with the
+    /// standard actionable filter. (NSMenu-style popups never appear in
+    /// `AXWindows`; `openMenuItems` handles those.)
+    static func popupWindowItems() -> [Element] {
+        let popups = WindowList.popupWindows(excludingPid: pid_t(ProcessInfo.processInfo.processIdentifier))
+        guard !popups.isEmpty else { return [] }
+        let deadline = CFAbsoluteTimeGetCurrent() + 0.5
+        var out: [Element] = []
+        var seen = Set<String>()
+        for pid in Set(popups.map(\.pid)) {
+            if CFAbsoluteTimeGetCurrent() > deadline { break }
+            let axApp = AXUIElementCreateApplication(pid)
+            AX.setTimeout(axApp, seconds: 0.15)
+            let bounds = popups.filter { $0.pid == pid }.map(\.bounds)
+            for win in AX.elements(axApp, kAXWindowsAttribute as String) {
+                guard let wf = AX.frame(win),
+                      bounds.contains(where: { abs($0.midX - wf.midX) < 8 && abs($0.midY - wf.midY) < 8 })
+                else { continue }
+                AX.setTimeout(win, seconds: 0.15)
+                var nodes: [Node] = []
+                walkChild(win, depth: 1, clip: wf, deadline: deadline, into: &nodes)
+                out += actionable(nodes, deadline: deadline, seen: &seen).0
             }
         }
         return out

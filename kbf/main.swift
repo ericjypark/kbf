@@ -7,10 +7,12 @@ if let i = CommandLine.arguments.firstIndex(of: "--debug-dump") {
     exit(0)
 }
 
-// Open-menu diagnostics: `kbf --debug-menu <AppName>` (opens its status-item menu).
+// Open-popup diagnostics: `kbf --debug-menu <AppName> [itemIndex]` (lists the
+// app's status items, or presses the chosen one and dumps what the finder sees).
 if let i = CommandLine.arguments.firstIndex(of: "--debug-menu") {
     let name = i + 1 < CommandLine.arguments.count ? CommandLine.arguments[i + 1] : nil
-    DebugMenu.run(appName: name)
+    let idx = i + 2 < CommandLine.arguments.count ? Int(CommandLine.arguments[i + 2]) : nil
+    DebugMenu.run(appName: name, itemIndex: idx)
     exit(0)
 }
 
