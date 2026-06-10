@@ -255,6 +255,7 @@ final class ModeController {
         case Key.delete:
             if !searchQuery.isEmpty { searchQuery.removeLast(); refilterSearch() }
         case Key.tab:
+            if flags.contains(.maskCommand) { return false }   // ⌘Tab app switcher
             moveSearchSelection(by: flags.contains(.maskShift) ? -1 : 1)
         case Key.down:
             moveSearchSelection(by: 1)
@@ -263,17 +264,21 @@ final class ModeController {
         default:
             guard let ch = chars.first else { return true }
             if flags.contains(.maskControl) {
-                // ⌃N / ⌃P cycle, like Homerow; swallow other control combos.
-                if ch == "n" { moveSearchSelection(by: 1) }
-                if ch == "p" { moveSearchSelection(by: -1) }
-            } else if ch.isUppercase, flags.contains(.maskShift) {
+                if ch == "n" { moveSearchSelection(by: 1); return true }
+                if ch == "p" { moveSearchSelection(by: -1); return true }
+                return false   // unhandled ⌃-combo (e.g. input-source switch) — let the system have it
+            }
+            if !flags.intersection([.maskCommand, .maskAlternate]).isEmpty {
+                return false   // ⌘/⌥ combos (Spotlight, kbf's own hotkeys) pass through
+            }
+            if ch.isUppercase, flags.contains(.maskShift) {
                 jumpToLabel(ch)
             } else if ch.isLetter || ch.isNumber || ch.isPunctuation || ch == " " {
                 searchQuery.append(ch)
                 refilterSearch()
             }
         }
-        return true   // search mode is modal: swallow everything (Esc exits)
+        return true   // otherwise modal: unmodified keys are query input (Esc exits)
     }
 
     private func moveSearchSelection(by delta: Int) {
