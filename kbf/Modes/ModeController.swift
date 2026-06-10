@@ -108,6 +108,7 @@ final class ModeController {
     func cancel() {
         generation += 1   // discard any in-flight find
         armWork?.cancel(); armWork = nil
+        Scroller.stopAnimation()
         keyTap.stop()
         overlay.hide()
         searchBar.hide()
@@ -354,17 +355,16 @@ final class ModeController {
         guard !scrollAreas.isEmpty else { return false }
         let shift = flags.contains(.maskShift)
         if code == Key.tab { switchArea(by: shift ? -1 : 1); return true }
-        if flags.contains(.maskControl), let c = chars.lowercased().first, c == "n" || c == "p" {
-            switchArea(by: c == "n" ? 1 : -1)
-            return true
-        }
-        guard let ch = chars.first, let cmd = ScrollKeymap.command(for: ch, shift: shift) else {
+        guard let ch = chars.first,
+              let cmd = ScrollKeymap.command(for: ch, shift: shift,
+                                             control: flags.contains(.maskControl)) else {
             return false   // not a scroll key — let it through
         }
 
         let area = scrollAreas[scrollActive]
         let big: Int32 = 8000
         var dx: Int32 = 0, dy: Int32 = 0
+        var smooth = false   // big motions glide; single steps stay instant for key repeat
         switch cmd {
         case .scroll(let ux, let uy):
             let step = Int32(AppSettings.shared.scrollStep)
@@ -372,11 +372,13 @@ final class ModeController {
         case .dash(let ux, let uy):
             let dash = Int32(AppSettings.shared.scrollDash)
             dx = Int32(ux) * dash; dy = Int32(uy) * dash
+            smooth = true
         case .halfPage(let down):
             // Half the VISIBLE height of the active area, like a paging key.
             let vr = area.axFrame.intersection(Geometry.screensBoundsAX)
             let half = Int32(max((vr.isNull ? 900 : vr.height) / 2, 100))
             dy = down ? -half : half
+            smooth = true
         case .edge(let top):
             dy = top ? big : -big
         case .nextArea: switchArea(by: 1); return true
@@ -390,7 +392,10 @@ final class ModeController {
         // true center can be off-screen).
         let vr = area.axFrame.intersection(Geometry.screensBoundsAX)
         let point = vr.isNull ? area.axCenter : CGPoint(x: vr.midX, y: vr.midY)
-        DispatchQueue.main.async { Scroller.scroll(at: point, dx: dx, dy: dy) }
+        DispatchQueue.main.async {
+            smooth ? Scroller.smoothScroll(at: point, dx: dx, dy: dy)
+                   : Scroller.scroll(at: point, dx: dx, dy: dy)
+        }
         return true
     }
 

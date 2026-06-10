@@ -12,7 +12,16 @@ enum ScrollKeymap {
         case jumpArea(Int)                // 0-based index
     }
 
-    static func command(for char: Character, shift: Bool) -> Command? {
+    static func command(for char: Character, shift: Bool, control: Bool = false) -> Command? {
+        if control {
+            switch char.lowercased().first {
+            case "d": return .halfPage(down: true)    // vim ⌃D
+            case "u": return .halfPage(down: false)   // vim ⌃U
+            case "n": return .nextArea
+            case "p": return .prevArea
+            default: return nil
+            }
+        }
         if let d = char.wholeNumberValue, (1...9).contains(d) { return .jumpArea(d - 1) }
         switch char.lowercased().first {
         case "h": return shift ? .dash(dx: 1, dy: 0) : .scroll(dx: 1, dy: 0)
