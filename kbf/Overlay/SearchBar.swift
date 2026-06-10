@@ -78,6 +78,9 @@ final class SearchBar {
             let y = screen.frame.maxY - 170
             panel.setFrameOrigin(NSPoint(x: x, y: y))
         }
+        // Re-assert before ordering in: a hidden panel can lose its all-Spaces
+        // behavior and re-home to the Space it was last shown on.
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         panel.orderFrontRegardless()
     }
 

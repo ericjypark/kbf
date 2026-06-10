@@ -4,6 +4,11 @@ import AppKit
 /// click-through panel per screen and routes each label to the display it belongs
 /// on — a single window spanning all displays renders nothing on secondary screens.
 /// Panels are rebuilt when the display arrangement changes.
+///
+/// The panels stay ordered-in permanently (transparent and click-through when
+/// empty): `.canJoinAllSpaces` only reliably follows Space switches while the
+/// window is visible — an orderOut/orderFront cycle can re-home the panel to
+/// the Space it was last shown on, putting hints on the wrong desktop.
 final class OverlayWindowController {
     private struct ScreenPanel { let screen: NSScreen; let panel: NSPanel; let root: CALayer }
     private var screens: [ScreenPanel] = []
@@ -20,6 +25,7 @@ final class OverlayWindowController {
 
     @objc private func rebuild() {
         screens.forEach { $0.panel.orderOut(nil) }
+        hints.removeAll()
         screens = NSScreen.screens.map { screen in
             let panel = NSPanel(contentRect: screen.frame,
                                 styleMask: [.borderless, .nonactivatingPanel],
@@ -37,6 +43,7 @@ final class OverlayWindowController {
             panel.contentView = view
             return ScreenPanel(screen: screen, panel: panel, root: root)
         }
+        screens.forEach { $0.panel.orderFrontRegardless() }   // stay in — see class doc
     }
 
     /// Screen panel whose frame contains the global point (falls back to the first).
@@ -147,12 +154,13 @@ final class OverlayWindowController {
         screens.forEach { $0.panel.orderFrontRegardless() }
     }
 
+    /// Clears all hint content. The panels themselves stay ordered-in
+    /// (transparent, click-through) so they keep following Space switches.
     func hide() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         clear()
         CATransaction.commit()
-        screens.forEach { $0.panel.orderOut(nil) }
     }
 
     // MARK: rendering
