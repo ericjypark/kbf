@@ -13,7 +13,7 @@ struct PreferencesView: View {
                     section("SHORTCUTS") {
                         shortcutRow("Click mode", "Label every clickable element", $settings.clickHotkey)
                         divider
-                        shortcutRow("Scroll mode", "h/j/k/l · ⇧ dash · Tab/1–9 switch area", $settings.scrollHotkey)
+                        shortcutRow("Scroll mode", "i/k/j/l · ⇧ dash · Tab/1–9 switch area", $settings.scrollHotkey)
                         divider
                         shortcutRow("Search mode", "Find an element by its text", $settings.searchHotkey)
                     }

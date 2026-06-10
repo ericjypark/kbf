@@ -1,6 +1,7 @@
-/// Pure mapping from a typed character (+shift) to a scroll-mode command.
-/// Vim directions (h/j/k/l), Homerow-style: shift = dash (accelerated),
-/// d/u half page, g/G top/bottom, 1–9 jump to a numbered scroll area.
+/// Pure mapping from a typed character (+shift/control) to a scroll-mode command.
+/// Inverted-T directions on the home area (i/k vertical, j/l horizontal),
+/// shift = dash (accelerated), d/u or ⌃D/⌃U half page, g/G top/bottom,
+/// 1–9 jump to a numbered scroll area, ⌃N/⌃P cycle areas.
 /// Sign convention matches `Scroller`: dy > 0 scrolls up, dx > 0 scrolls left.
 enum ScrollKeymap {
     enum Command: Equatable {
@@ -24,10 +25,10 @@ enum ScrollKeymap {
         }
         if let d = char.wholeNumberValue, (1...9).contains(d) { return .jumpArea(d - 1) }
         switch char.lowercased().first {
-        case "h": return shift ? .dash(dx: 1, dy: 0) : .scroll(dx: 1, dy: 0)
-        case "j": return shift ? .dash(dx: 0, dy: -1) : .scroll(dx: 0, dy: -1)
-        case "k": return shift ? .dash(dx: 0, dy: 1) : .scroll(dx: 0, dy: 1)
-        case "l": return shift ? .dash(dx: -1, dy: 0) : .scroll(dx: -1, dy: 0)
+        case "i": return shift ? .dash(dx: 0, dy: 1) : .scroll(dx: 0, dy: 1)     // up
+        case "k": return shift ? .dash(dx: 0, dy: -1) : .scroll(dx: 0, dy: -1)   // down
+        case "j": return shift ? .dash(dx: 1, dy: 0) : .scroll(dx: 1, dy: 0)     // left
+        case "l": return shift ? .dash(dx: -1, dy: 0) : .scroll(dx: -1, dy: 0)   // right
         case "d": return .halfPage(down: true)
         case "u": return .halfPage(down: false)
         case "g": return .edge(top: !shift)

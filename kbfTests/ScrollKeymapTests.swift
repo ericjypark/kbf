@@ -2,16 +2,17 @@ import XCTest
 @testable import kbf
 
 final class ScrollKeymapTests: XCTestCase {
-    func testVimDirections() {
-        XCTAssertEqual(ScrollKeymap.command(for: "h", shift: false), .scroll(dx: 1, dy: 0))
-        XCTAssertEqual(ScrollKeymap.command(for: "j", shift: false), .scroll(dx: 0, dy: -1))
-        XCTAssertEqual(ScrollKeymap.command(for: "k", shift: false), .scroll(dx: 0, dy: 1))
+    func testArrowDirections() {
+        // Inverted-T on the home area: i/k vertical, j/l horizontal.
+        XCTAssertEqual(ScrollKeymap.command(for: "i", shift: false), .scroll(dx: 0, dy: 1))
+        XCTAssertEqual(ScrollKeymap.command(for: "k", shift: false), .scroll(dx: 0, dy: -1))
+        XCTAssertEqual(ScrollKeymap.command(for: "j", shift: false), .scroll(dx: 1, dy: 0))
         XCTAssertEqual(ScrollKeymap.command(for: "l", shift: false), .scroll(dx: -1, dy: 0))
     }
 
     func testShiftIsDash() {
-        XCTAssertEqual(ScrollKeymap.command(for: "j", shift: true), .dash(dx: 0, dy: -1))
-        XCTAssertEqual(ScrollKeymap.command(for: "k", shift: true), .dash(dx: 0, dy: 1))
+        XCTAssertEqual(ScrollKeymap.command(for: "i", shift: true), .dash(dx: 0, dy: 1))
+        XCTAssertEqual(ScrollKeymap.command(for: "k", shift: true), .dash(dx: 0, dy: -1))
     }
 
     func testHalfPageAndEdges() {
@@ -29,11 +30,12 @@ final class ScrollKeymapTests: XCTestCase {
 
     func testUppercaseTreatedAsShifted() {
         // The tap delivers shifted chars uppercased; mapping must be case-insensitive.
-        XCTAssertEqual(ScrollKeymap.command(for: "J", shift: true), .dash(dx: 0, dy: -1))
+        XCTAssertEqual(ScrollKeymap.command(for: "K", shift: true), .dash(dx: 0, dy: -1))
     }
 
     func testUnknownIsNil() {
         XCTAssertNil(ScrollKeymap.command(for: "z", shift: false))
+        XCTAssertNil(ScrollKeymap.command(for: "h", shift: false))
         XCTAssertNil(ScrollKeymap.command(for: " ", shift: false))
     }
 
