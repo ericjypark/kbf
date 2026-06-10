@@ -7,6 +7,13 @@ if let i = CommandLine.arguments.firstIndex(of: "--debug-dump") {
     exit(0)
 }
 
+// Open-menu diagnostics: `kbf --debug-menu <AppName>` (opens its status-item menu).
+if let i = CommandLine.arguments.firstIndex(of: "--debug-menu") {
+    let name = i + 1 < CommandLine.arguments.count ? CommandLine.arguments[i + 1] : nil
+    DebugMenu.run(appName: name)
+    exit(0)
+}
+
 // Click-path diagnostics: `kbf --debug-click <App> <index>`.
 if let i = CommandLine.arguments.firstIndex(of: "--debug-click") {
     let name = i + 1 < CommandLine.arguments.count ? CommandLine.arguments[i + 1] : nil
